@@ -42,18 +42,27 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          rm -rf /tmp/lcm53 /tmp/lcm53.zip /tmp/lcm_unpack
+          rm -rf /tmp/lcm53.zip /tmp/lcm_unpack
           curl -fsSL --retry 4 -o /tmp/lcm53.zip https://research.nii.ac.jp/~uno/code/lcm53.zip
           mkdir -p /tmp/lcm_unpack
           unzip -q /tmp/lcm53.zip -d /tmp/lcm_unpack
-          LCM_DIR="$(find /tmp/lcm_unpack -type f -name Makefile -printf '%h\n' | head -1)"
-          test -n "$LCM_DIR"
-          set +e
-          make -C "$LCM_DIR" > /tmp/lcm_build.log 2>&1
-          rc=$?
-          set -e
-          cat /tmp/lcm_build.log
-          test "$rc" = "0"
+          echo "=== archive tree ==="
+          find /tmp/lcm_unpack -maxdepth 3 -type f -printf '%p\n' | sort | head -200
+          echo "=== lcm source candidates ==="
+          find /tmp/lcm_unpack -type f \( -iname 'lcm.c' -o -iname 'makefile' \) -printf '%p\n' | sort
+
+          LCM_C="$(find /tmp/lcm_unpack -type f -iname 'lcm.c' | head -1)"
+          test -n "$LCM_C"
+          LCM_DIR="$(dirname "$LCM_C")"
+          echo "LCM_DIR=$LCM_DIR"
+          ls -la "$LCM_DIR"
+          echo "=== Makefile ==="
+          sed -n '1,220p' "$LCM_DIR/Makefile"
+
+          make -C "$LCM_DIR"
+          echo "=== after make ==="
+          find "$LCM_DIR" -maxdepth 2 -type f -printf '%m %p\n' | sort | tail -100
+
           LCM_BIN="$(find "$LCM_DIR" -maxdepth 2 -type f -name lcm -perm -111 | head -1)"
           test -x "$LCM_BIN"
           echo "LCM_BIN=$LCM_BIN" >> "$GITHUB_ENV"
