@@ -1,11 +1,10 @@
-# trigger: encrypted-artifact-handoff-v2
 name: private-exp207-runner
 
 on:
   push:
     branches: [main]
     paths:
-      - '.github/workflows/private-exp207.yml'
+      - 'trigger-exp207'
   workflow_dispatch:
 
 permissions:
@@ -50,38 +49,14 @@ jobs:
           echo "$status" > results/207_runner_exit_code.txt
           exit 0
 
-      - name: Encrypt result bundle
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p /tmp/exp207-transfer
-          cat > /tmp/exp207-transfer/public.pem <<'PEM'
------BEGIN PUBLIC KEY-----
-MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAvfQybXdEzkTGbT74wiuE
-uubmRsEteaydgllv31XT19gk32O8kkZs8k5r/hcxFG0iNZ0DmvUkf32SJ3pPyupa
-ilH96OzwBGWUoqcRFehhBGRcwsnVr8XlIQ8hdKBFyzZhEgNgHsD5lQU08PeRwizD
-rKGWNz4jZ9/KebVAEK6hr7QEEdJU69g/01QUArBNiMjQnq+kpxyEJz7BNjTl1L88
-BT3ZQK9I9reMCc3WoJ25qSkbg53bXUZN6qc+B57nJ/P+I0O76h+bKJ+kjOPtDteT
-Eh1qPkjfj/m+Oa30hwSSXUoqovnxETFouYHqsldK9G5wpv/fiBptbag21YUtH8CD
-NQIDAQAB
------END PUBLIC KEY-----
-PEM
-          cd private-research
-          tar -czf /tmp/exp207-transfer/result.tar.gz             results/207_runner_exit_code.txt             results/207_t5tiny_central_cutting_stdout.txt             results/207_t5tiny_central_cutting.json
-          openssl rand -base64 32 > /tmp/exp207-transfer/pass.txt
-          openssl enc -aes-256-cbc -pbkdf2 -salt             -in /tmp/exp207-transfer/result.tar.gz             -out /tmp/exp207-transfer/result.enc             -pass file:/tmp/exp207-transfer/pass.txt
-          openssl pkeyutl -encrypt             -pubin -inkey /tmp/exp207-transfer/public.pem             -in /tmp/exp207-transfer/pass.txt             -out /tmp/exp207-transfer/pass.enc             -pkeyopt rsa_padding_mode:oaep             -pkeyopt rsa_oaep_md:sha256
-          rm -f /tmp/exp207-transfer/pass.txt /tmp/exp207-transfer/result.tar.gz
-          sha256sum /tmp/exp207-transfer/result.enc > /tmp/exp207-transfer/result.sha256
-
-      - name: Upload encrypted result only
+      - name: Upload short-lived result artifact
         uses: actions/upload-artifact@v4
         with:
-          name: exp207-encrypted-result
+          name: exp207-result
           path: |
-            /tmp/exp207-transfer/result.enc
-            /tmp/exp207-transfer/pass.enc
-            /tmp/exp207-transfer/result.sha256
+            private-research/results/207_t5tiny_central_cutting.json
+            private-research/results/207_t5tiny_central_cutting_stdout.txt
+            private-research/results/207_runner_exit_code.txt
           if-no-files-found: error
           retention-days: 1
 
