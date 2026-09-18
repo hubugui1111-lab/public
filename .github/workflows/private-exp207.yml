@@ -1,5 +1,5 @@
-# trigger: exp208-split-policy-control
-name: private-exp208-runner
+# trigger: exp209-overcomplete-cone
+name: private-exp209-runner
 
 on:
   push:
@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 jobs:
-  exp208:
+  exp209:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -35,7 +35,7 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install --upgrade pip >/dev/null
-          python -m pip install numpy "transformers>=4.45,<5" sentencepiece >/dev/null
+          python -m pip install numpy scipy "transformers>=4.45,<5" sentencepiece >/dev/null
           python -m pip install torch --index-url https://download.pytorch.org/whl/cpu >/dev/null
 
       - name: Run private experiment quietly
@@ -44,23 +44,23 @@ jobs:
           set +e
           cd private-research
           mkdir -p results
-          python experiments/208_t5tiny_split_policy_frontier.py > results/208_t5tiny_split_policy_frontier_stdout.txt 2>&1
+          python experiments/209_t5tiny_overcomplete_cone_frontier.py > results/209_t5tiny_overcomplete_cone_frontier_stdout.txt 2>&1
           status=$?
-          echo "$status" > results/208_runner_exit_code.txt
+          echo "$status" > results/209_runner_exit_code.txt
           exit 0
 
       - name: Upload private result artifact
         uses: actions/upload-artifact@v4
         with:
-          name: exp208-result
+          name: exp209-result
           path: |
-            private-research/results/208_t5tiny_split_policy_frontier.json
-            private-research/results/208_t5tiny_split_policy_frontier_stdout.txt
-            private-research/results/208_runner_exit_code.txt
+            private-research/results/209_t5tiny_overcomplete_cone_frontier.json
+            private-research/results/209_t5tiny_overcomplete_cone_frontier_stdout.txt
+            private-research/results/209_runner_exit_code.txt
           if-no-files-found: error
           retention-days: 1
 
       - name: Reflect experiment exit status
         run: |
-          code="$(cat private-research/results/208_runner_exit_code.txt)"
+          code="$(cat private-research/results/209_runner_exit_code.txt)"
           test "$code" = "0"
