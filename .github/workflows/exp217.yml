@@ -48,7 +48,12 @@ jobs:
           unzip -q /tmp/lcm53.zip -d /tmp/lcm_unpack
           LCM_DIR="$(find /tmp/lcm_unpack -type f -name Makefile -printf '%h\n' | head -1)"
           test -n "$LCM_DIR"
-          make -C "$LCM_DIR" >/tmp/lcm_build.log 2>&1
+          set +e
+          make -C "$LCM_DIR" > /tmp/lcm_build.log 2>&1
+          rc=$?
+          set -e
+          cat /tmp/lcm_build.log
+          test "$rc" = "0"
           LCM_BIN="$(find "$LCM_DIR" -maxdepth 2 -type f -name lcm -perm -111 | head -1)"
           test -x "$LCM_BIN"
           echo "LCM_BIN=$LCM_BIN" >> "$GITHUB_ENV"
