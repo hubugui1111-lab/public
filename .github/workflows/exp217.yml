@@ -1,4 +1,4 @@
-# trigger: exp217-top1-11658126
+# trigger: exp217-pin-private-11658126
 name: exp217-lcm-fixed-h0-oracle
 
 on:
@@ -28,6 +28,7 @@ jobs:
           repository: hubugui1111-lab/tda-ppml-research
           token: ${{ secrets.PRIVATE_REPO_TOKEN }}
           path: private-research
+          ref: 11658126ddccef7cf6d46e852c5255311ff49c34
           fetch-depth: 1
           persist-credentials: false
 
