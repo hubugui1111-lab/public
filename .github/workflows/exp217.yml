@@ -57,9 +57,9 @@ jobs:
           echo "LCM_DIR=$LCM_DIR"
           ls -la "$LCM_DIR"
           echo "=== Makefile ==="
-          sed -n '1,220p' "$LCM_DIR/Makefile"
+          sed -n '1,220p' "$LCM_DIR/makefile"
 
-          make -C "$LCM_DIR"
+          make -C "$LCM_DIR" -f makefile
           echo "=== after make ==="
           find "$LCM_DIR" -maxdepth 2 -type f -printf '%m %p\n' | sort | tail -100
 
