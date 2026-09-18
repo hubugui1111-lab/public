@@ -1,0 +1,71 @@
+name: private-exp207-runner
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/private-exp207.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  exp207:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      HF_HUB_DISABLE_TELEMETRY: "1"
+      TOKENIZERS_PARALLELISM: "false"
+    steps:
+      - name: Checkout scratch repo
+        uses: actions/checkout@v4
+
+      - name: Checkout private research repo
+        uses: actions/checkout@v4
+        with:
+          repository: hubugui1111-lab/tda-ppml-research
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          path: private-research
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Install runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip >/dev/null
+          python -m pip install numpy "transformers>=4.45,<5" sentencepiece >/dev/null
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu >/dev/null
+
+      - name: Run private experiment quietly
+        id: runexp
+        shell: bash
+        run: |
+          set +e
+          cd private-research
+          mkdir -p results
+          python experiments/207_t5tiny_central_cutting_smoke.py             > results/207_t5tiny_central_cutting_stdout.txt 2>&1
+          status=$?
+          echo "$status" > results/207_runner_exit_code.txt
+          exit 0
+
+      - name: Commit result back to private repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd private-research
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add results/207_t5tiny_central_cutting_stdout.txt results/207_runner_exit_code.txt
+          test ! -f results/207_t5tiny_central_cutting.json || git add results/207_t5tiny_central_cutting.json
+          if ! git diff --cached --quiet; then
+            git commit -m "exp207: record public-runner tiny cutting result"
+            git push origin HEAD:main
+          fi
+
+      - name: Reflect experiment exit status
+        shell: bash
+        run: |
+          code="$(cat private-research/results/207_runner_exit_code.txt)"
+          test "$code" = "0"
