@@ -1,4 +1,4 @@
-# trigger: exp210-h0-library
+# Canonical public-runner pattern. Research code stays private.
 name: private-exp210-runner
 
 on:
@@ -28,8 +28,8 @@ jobs:
           repository: hubugui1111-lab/tda-ppml-research
           token: ${{ secrets.PRIVATE_REPO_TOKEN }}
           path: private-research
-          fetch-depth: 1
-          persist-credentials: false
+          fetch-depth: 0
+          persist-credentials: true
 
       - name: Install runtime
         run: |
@@ -49,18 +49,34 @@ jobs:
           echo "$status" > results/210_runner_exit_code.txt
           exit 0
 
-      - name: Upload private result artifact
+      - name: Commit result back to private repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd private-research
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add results/210_t5tiny_h0_template_library_stdout.txt results/210_runner_exit_code.txt
+          test ! -f results/210_t5tiny_h0_template_library.json || git add results/210_t5tiny_h0_template_library.json
+          if ! git diff --cached --quiet; then
+            git commit -m "exp210: record public-runner H0 library result"
+            git push origin HEAD:main
+          fi
+
+      - name: Upload backup artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: exp210-result
+          name: exp210-result-${{ github.run_id }}
           path: |
             private-research/results/210_t5tiny_h0_template_library.json
             private-research/results/210_t5tiny_h0_template_library_stdout.txt
             private-research/results/210_runner_exit_code.txt
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 1
 
       - name: Reflect experiment exit status
+        shell: bash
         run: |
           code="$(cat private-research/results/210_runner_exit_code.txt)"
           test "$code" = "0"
