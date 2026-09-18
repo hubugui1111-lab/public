@@ -1,3 +1,4 @@
+# trigger: 2026-09-18
 name: private-exp207-runner
 
 on:
@@ -45,7 +46,7 @@ jobs:
           set +e
           cd private-research
           mkdir -p results
-          python experiments/207_t5tiny_central_cutting_smoke.py             > results/207_t5tiny_central_cutting_stdout.txt 2>&1
+          python experiments/207_t5tiny_central_cutting_smoke.py > results/207_t5tiny_central_cutting_stdout.txt 2>&1
           status=$?
           echo "$status" > results/207_runner_exit_code.txt
           exit 0
