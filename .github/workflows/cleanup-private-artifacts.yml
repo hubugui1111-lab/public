@@ -19,6 +19,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          for id in 10554368790 10553324792 10555185525 10554805706; do
+          for id in 10554368790 10553324792 10555185525 10554805706 10554981084; do
             gh api -X DELETE "/repos/hubugui1111-lab/public/actions/artifacts/$id" || true
           done
