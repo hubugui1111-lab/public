@@ -67,6 +67,27 @@ jobs:
           test -x "$LCM_BIN"
           echo "LCM_BIN=$LCM_BIN" >> "$GITHUB_ENV"
 
+      - name: Audit LCM command semantics on exact toy
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/lcm_toy.dat <<'EOF'
+          2 3 4
+          1 3 4
+          3 4
+          1 2 4
+          2 4
+          1 2 3
+          EOF
+          echo "=== ordinary closed, min length 2, support 3 ==="
+          "$LCM_BIN" Cf -l 2 /tmp/lcm_toy.dat 3 /tmp/lcm_toy_all.out
+          cat /tmp/lcm_toy_all.out || true
+          echo "=== with -S 1 ==="
+          "$LCM_BIN" Cf -l 2 -S 1 /tmp/lcm_toy.dat 3 /tmp/lcm_toy_s1.out
+          cat /tmp/lcm_toy_s1.out || true
+          echo "=== with -K 1, base support 1 ==="
+          "$LCM_BIN" C -l 2 -K 1 /tmp/lcm_toy.dat 1 || true
+
       - name: Recreate clean OPT sign pool
         shell: bash
         run: |
