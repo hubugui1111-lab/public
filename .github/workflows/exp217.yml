@@ -1,0 +1,99 @@
+name: exp217-lcm-fixed-h0-oracle
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/exp217.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  exp217:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      HF_HUB_DISABLE_TELEMETRY: "1"
+      HF_HUB_DISABLE_XET: "1"
+      TOKENIZERS_PARALLELISM: "false"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout private research repo READ ONLY
+        uses: actions/checkout@v4
+        with:
+          repository: hubugui1111-lab/tda-ppml-research
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          path: private-research
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Install runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip >/dev/null
+          python -m pip install numpy datasets "transformers>=4.45,<5" sentencepiece >/dev/null
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu >/dev/null
+
+      - name: Download and compile official LCM 5.3
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/lcm53 /tmp/lcm53.zip /tmp/lcm_unpack
+          curl -fsSL --retry 4 -o /tmp/lcm53.zip https://research.nii.ac.jp/~uno/code/lcm53.zip
+          mkdir -p /tmp/lcm_unpack
+          unzip -q /tmp/lcm53.zip -d /tmp/lcm_unpack
+          LCM_DIR="$(find /tmp/lcm_unpack -type f -name Makefile -printf '%h\n' | head -1)"
+          test -n "$LCM_DIR"
+          make -C "$LCM_DIR" >/tmp/lcm_build.log 2>&1
+          LCM_BIN="$(find "$LCM_DIR" -maxdepth 2 -type f -name lcm -perm -111 | head -1)"
+          test -x "$LCM_BIN"
+          echo "LCM_BIN=$LCM_BIN" >> "$GITHUB_ENV"
+
+      - name: Recreate clean OPT sign pool
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd private-research
+          mkdir -p results
+          python experiments/215_collect_clean_opt_sign_pool.py \
+            --n-build 8192 \
+            --n-eval 1024 \
+            > results/217_collect_sign_pool_stdout.txt 2>&1
+
+      - name: Run exact closed-itemset oracle
+        shell: bash
+        run: |
+          set +e
+          cd private-research
+          python experiments/217_lcm_fixed_h0_oracle.py \
+            --lcm "$LCM_BIN" \
+            --max-greedy-rounds 32 \
+            --timeout-per-call 120 \
+            > results/217_lcm_fixed_h0_oracle_stdout.txt 2>&1
+          status=$?
+          echo "$status" > results/217_runner_exit_code.txt
+          exit 0
+
+      - name: Upload short-lived result artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: exp217-result
+          path: |
+            private-research/results/217_lcm_fixed_h0_oracle.json
+            private-research/results/217_lcm_fixed_h0_oracle_stdout.txt
+            private-research/results/217_runner_exit_code.txt
+            private-research/results/215_clean_sign_pool.json
+            private-research/results/217_collect_sign_pool_stdout.txt
+          if-no-files-found: warn
+          retention-days: 1
+
+      - name: Reflect experiment exit status
+        shell: bash
+        run: |
+          code="$(cat private-research/results/217_runner_exit_code.txt)"
+          test "$code" = "0"
