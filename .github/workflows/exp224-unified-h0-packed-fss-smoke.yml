@@ -1,0 +1,70 @@
+name: exp224-unified-h0-packed-fss-smoke
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/exp224-unified-h0-packed-fss-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  exp224:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PYTHONUNBUFFERED: '1'
+
+    steps:
+      - name: Checkout public scratch repo
+        uses: actions/checkout@v4
+
+      - name: Checkout private TDA research repo read only
+        uses: actions/checkout@v4
+        with:
+          repository: hubugui1111-lab/tda-ppml-research
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          ref: 31ca557
+          path: private-research
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Install tiny runtime
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip >/dev/null
+          python -m pip install numpy >/dev/null
+
+      - name: Run unified H0 reference smoke quietly
+        shell: bash
+        run: |
+          set +e
+          cd private-research
+          mkdir -p results
+          python experiments/224_packed_h0_protocol_smoke.py \
+            > results/224_packed_h0_protocol_smoke_stdout.txt 2>&1
+          status=$?
+          echo "$status" > results/224_runner_exit_code.txt
+          git rev-parse HEAD > results/224_private_head_sha.txt
+          exit 0
+
+      - name: Upload short-lived result artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: exp224-private-result-${{ github.run_id }}
+          path: |
+            private-research/results/224_packed_h0_protocol_smoke.json
+            private-research/results/224_packed_h0_protocol_smoke_stdout.txt
+            private-research/results/224_runner_exit_code.txt
+            private-research/results/224_private_head_sha.txt
+          if-no-files-found: warn
+          retention-days: 1
+
+      - name: Reflect experiment exit status
+        shell: bash
+        run: |
+          code="$(cat private-research/results/224_runner_exit_code.txt)"
+          test "$code" = "0"
