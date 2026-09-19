@@ -1,4 +1,5 @@
 name: exp219-multi-h0-exact-capacity
+# rerun after Python 3.12 import fix
 
 on:
   push:
