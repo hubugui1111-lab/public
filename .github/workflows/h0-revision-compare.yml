@@ -1,4 +1,8 @@
 # TEMPLATE ONLY: ephemeral public compute, never publish private source or logs.
+# Replay historical unpruned defaults with controller AND template from 5150a42;
+# that older driver does not accept this template's new --comparison argument.
+# New controllers retain their own strict work-count schema; leaf-lookup uses
+# the same new private_ref for all three checkouts, with two independent builds.
 name: h0-revision-compare-audit
 
 on:
@@ -8,13 +12,21 @@ on:
         description: Immutable controller SHA containing the common verifier
         required: true
         type: string
+      comparison:
+        description: Public comparison axis; leaf-lookup requires both revisions equal private_ref
+        required: true
+        default: ot-packing
+        type: choice
+        options:
+          - ot-packing
+          - leaf-lookup
       revision_a:
-        description: Immutable private revision A (default OT24)
+        description: Immutable A (historical OT24 default; use private_ref for leaf-lookup)
         required: true
         default: 1ddbc02f9bd2657ca6e1b5dadd5b96551c361082
         type: string
       revision_b:
-        description: Immutable private revision B (default OT64)
+        description: Immutable B (historical OT64 default; use private_ref for leaf-lookup)
         required: true
         default: c726fffe018f922e8bfc8757dab322e6a8617198
         type: string
@@ -34,6 +46,7 @@ jobs:
       CONTROLLER_SHA: ${{ inputs.private_ref }}
       REVISION_A_SHA: ${{ inputs.revision_a }}
       REVISION_B_SHA: ${{ inputs.revision_b }}
+      AUDIT_COMPARISON: ${{ inputs.comparison }}
       AUDIT_WORKLOAD: ${{ matrix.workload }}
     steps:
       - name: Validate immutable references and initialize private scratch
@@ -43,7 +56,12 @@ jobs:
           [[ "$CONTROLLER_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 2
           [[ "$REVISION_A_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 2
           [[ "$REVISION_B_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 2
-          [[ "$REVISION_A_SHA" != "$REVISION_B_SHA" ]] || exit 2
+          case "$AUDIT_COMPARISON" in
+            ot-packing) [[ "$REVISION_A_SHA" != "$REVISION_B_SHA" ]] || exit 2 ;;
+            leaf-lookup)
+              [[ "$REVISION_A_SHA" = "$CONTROLLER_SHA" && "$REVISION_B_SHA" = "$CONTROLLER_SHA" ]] || exit 2 ;;
+            *) exit 2 ;;
+          esac
           [[ "$AUDIT_WORKLOAD" = hit || "$AUDIT_WORKLOAD" = fallback ]] || exit 2
           TASK_DIR="$RUNNER_TEMP/h0-revision-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           echo "TASK_DIR=$TASK_DIR" >> "$GITHUB_ENV"
@@ -144,7 +162,7 @@ jobs:
             fi
           done
 
-      - name: Compare both revisions using one fixed verifier quietly
+      - name: Compare both fixed variants using one common verifier quietly
         shell: bash
         run: |
           set -euo pipefail
@@ -155,6 +173,7 @@ jobs:
             --revision-a-sha "$REVISION_A_SHA" \
             --revision-b-sha "$REVISION_B_SHA" \
             --controller-sha "$CONTROLLER_SHA" \
+            --comparison "$AUDIT_COMPARISON" \
             --compiler-binary /usr/bin/clang++ \
             --workload "$AUDIT_WORKLOAD" \
             --report "$TASK_DIR/summary.json" \
