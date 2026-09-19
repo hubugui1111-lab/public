@@ -93,5 +93,6 @@ jobs:
           retention-days: 1
 
       - name: Reflect experiment status
+        if: always()
         shell: bash
         run: test "$(cat private-research/results/225_private_h0_route_e2e/runner_exit_code.txt)" = "0"
