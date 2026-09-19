@@ -1,0 +1,86 @@
+# TEMPLATE ONLY: private source, ephemeral component experiment, aggregate output.
+name: h0-persistent-table-small-probe
+on:
+  workflow_dispatch:
+    inputs:
+      private_ref:
+        description: Full immutable private source SHA
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      TDA_COMMIT: ${{ inputs.private_ref }}
+    steps:
+      - name: Prepare bounded private probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$TDA_COMMIT" =~ ^[0-9a-f]{40}$ ]] || exit 2
+          TASK_DIR="$RUNNER_TEMP/h0-readonly-probe-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          echo "TASK_DIR=$TASK_DIR" >> "$GITHUB_ENV"
+          umask 077
+          mkdir -p "$TASK_DIR/out"
+          printf '{"schema":1,"pass":false,"stage":"not_run"}\n' > "$TASK_DIR/out/small-summary.json"
+          printf '{"source_sha":"%s","floram_sha":"cbc6fa1434426096dda1fa567bacba1d7fc8d5b5","oblivc_sha":"e02e5c590523ef4dae06e167a7fa00037bb3fdaf","scope":"component_only_4_rows_4_ring24_words_4_reads","image_id":null}\n' "$TDA_COMMIT" > "$TASK_DIR/out/provenance.json"
+      - name: Checkout private source read-only
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: hubugui1111-lab/tda-ppml-research
+          ref: ${{ inputs.private_ref }}
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          path: private-research
+          fetch-depth: 1
+          persist-credentials: false
+          submodules: false
+      - name: Build fixed author implementation with six-minute bound quietly
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C private-research rev-parse HEAD)" = "$TDA_COMMIT"
+          if ! timeout 360 docker build --progress=plain -t "h0-readonly-probe:$GITHUB_RUN_ID" \
+            private-research/experiments/231_h0_persistent_table_probe > "$TASK_DIR/build.log" 2>&1; then
+            python3 private-research/experiments/231_h0_persistent_table_probe/summarize_build.py \
+              "$TASK_DIR/build.log" "$TASK_DIR/out/small-summary.json"
+            exit 1
+          fi
+          docker image inspect --format '{{.Id}}' "h0-readonly-probe:$GITHUB_RUN_ID" > "$TASK_DIR/image-id"
+          python3 - "$TASK_DIR" <<'PY'
+          import json, pathlib, re, sys
+          p=pathlib.Path(sys.argv[1]); image=(p/'image-id').read_text().strip()
+          assert re.fullmatch(r'sha256:[0-9a-f]{64}', image)
+          f=p/'out/provenance.json'; v=json.loads(f.read_text()); v['image_id']=image
+          f.write_text(json.dumps(v)+'\n')
+          PY
+      - name: Run private-address fresh-share small probe quietly
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm --network none --user "$(id -u):$(id -g)" \
+            --name "h0-readonly-probe-$GITHUB_RUN_ID" \
+            -v "$TASK_DIR/out:/out" "h0-readonly-probe:$GITHUB_RUN_ID" \
+            --elements 4 --timeout 90 --output /out/small-summary.json \
+            > "$TASK_DIR/probe.log" 2>&1
+      - name: Upload short-lived component summary
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: h0-persistent-table-small-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ env.TASK_DIR }}/out/small-summary.json
+            ${{ env.TASK_DIR }}/out/provenance.json
+          if-no-files-found: error
+          retention-days: 1
+      - name: Remove private Runner state
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker rm -f "h0-readonly-probe-$GITHUB_RUN_ID" >/dev/null 2>&1 || true
+          docker image rm -f "h0-readonly-probe:$GITHUB_RUN_ID" >/dev/null 2>&1 || true
+          case "$TASK_DIR" in "$RUNNER_TEMP"/h0-readonly-probe-*) ;; *) exit 2 ;; esac
+          rm -rf -- "$TASK_DIR" "$GITHUB_WORKSPACE/private-research"
