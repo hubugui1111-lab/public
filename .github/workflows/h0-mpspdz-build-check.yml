@@ -12,6 +12,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          umask 077
           TASK_DIR="$RUNNER_TEMP/h0-mpspdz-public-build"
           echo "TASK_DIR=$TASK_DIR" >> "$GITHUB_ENV"
           mkdir -p "$TASK_DIR/spdz"
@@ -25,6 +26,9 @@ jobs:
         shell: bash
         run: |
           set -uo pipefail
+          umask 077
+          clang++ --version
+          lscpu | sed -n '1,28p'
           # No private checkout, source, inputs, or token exists in this job.
           printf '%s\n' 'USE_KOS = 1' >> "$TASK_DIR/spdz/CONFIG.mine"
           timeout --signal=TERM --kill-after=10s 1200s make -C "$TASK_DIR/spdz" -j2 semi-party.x > "$TASK_DIR/build.log" 2>&1
