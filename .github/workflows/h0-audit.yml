@@ -14,7 +14,7 @@ on:
         required: true
         default: complete
         type: choice
-        options: [complete, scatter, model0, affine, scatter-bits, ot4, batch-dpf, waksman, ot4-long, orcompact, deferred-gather, masked-scatter, scalar-affine, inherited-batch, saved-ideas]
+        options: [complete, scatter, model0, affine, scatter-bits, ot4, batch-dpf, waksman, ot4-long, orcompact, deferred-gather, masked-scatter, scalar-affine, inherited-batch, saved-ideas, all-leaf]
       kkot_pool:
         description: Public KKOT pool size shared by candidate and baseline
         required: true
@@ -32,7 +32,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: ${{ fromJSON(inputs.checks == 'scatter' && '["scatter"]' || inputs.checks == 'model0' && '["model0"]' || inputs.checks == 'affine' && '["affine"]' || inputs.checks == 'scatter-bits' && '["scatter-bits"]' || inputs.checks == 'ot4' && '["ot4"]' || inputs.checks == 'batch-dpf' && '["batch-dpf"]' || inputs.checks == 'waksman' && '["waksman"]' || inputs.checks == 'ot4-long' && '["ot4-long"]' || inputs.checks == 'orcompact' && '["orcompact"]' || inputs.checks == 'deferred-gather' && '["deferred-gather"]' || inputs.checks == 'masked-scatter' && '["masked-scatter"]' || inputs.checks == 'scalar-affine' && '["scalar-affine"]' || inputs.checks == 'inherited-batch' && '["inherited-batch"]' || inputs.checks == 'saved-ideas' && '["saved-ideas"]' || '["model0","model1","boundaries","lookup","slots","scatter","affine","scatter-bits","ot4","batch-dpf","waksman","ot4-long","orcompact","deferred-gather","masked-scatter","scalar-affine","inherited-batch"]') }}
+        suite: ${{ fromJSON(inputs.checks == 'scatter' && '["scatter"]' || inputs.checks == 'model0' && '["model0"]' || inputs.checks == 'affine' && '["affine"]' || inputs.checks == 'scatter-bits' && '["scatter-bits"]' || inputs.checks == 'ot4' && '["ot4"]' || inputs.checks == 'batch-dpf' && '["batch-dpf"]' || inputs.checks == 'waksman' && '["waksman"]' || inputs.checks == 'ot4-long' && '["ot4-long"]' || inputs.checks == 'orcompact' && '["orcompact"]' || inputs.checks == 'deferred-gather' && '["deferred-gather"]' || inputs.checks == 'masked-scatter' && '["masked-scatter"]' || inputs.checks == 'scalar-affine' && '["scalar-affine"]' || inputs.checks == 'inherited-batch' && '["inherited-batch"]' || inputs.checks == 'saved-ideas' && '["saved-ideas"]' || inputs.checks == 'all-leaf' && '["all-leaf"]' || '["model0","model1","boundaries","lookup","slots","scatter","affine","scatter-bits","ot4","batch-dpf","waksman","ot4-long","orcompact","deferred-gather","masked-scatter","scalar-affine","inherited-batch"]') }}
     env:
       TDA_COMMIT: ${{ inputs.private_ref }}
       AUDIT_SUITE: ${{ matrix.suite }}
