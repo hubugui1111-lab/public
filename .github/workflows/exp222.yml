@@ -1,0 +1,81 @@
+name: exp222-pairwise-capacity-upper
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/exp222.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  exp222:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      HF_HUB_DISABLE_TELEMETRY: "1"
+      HF_HUB_DISABLE_XET: "1"
+      TOKENIZERS_PARALLELISM: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout private research repo READ ONLY
+        uses: actions/checkout@v4
+        with:
+          repository: hubugui1111-lab/tda-ppml-research
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          ref: 1acce365cdc8d4cc0ce9effcabf6bba43c48fee2
+          path: private-research
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Install runtime
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip >/dev/null
+          python -m pip install numpy datasets "transformers>=4.45,<5" sentencepiece >/dev/null
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu >/dev/null
+
+      - name: Recreate clean OPT sign pool
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd private-research
+          mkdir -p results
+          python experiments/215_collect_clean_opt_sign_pool.py --n-build 8192 --n-eval 1024             > results/222_collect_sign_pool_stdout.txt 2>&1
+
+      - name: Regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd private-research
+          python tests/test_exp222_pairwise_capacity_upper.py             > results/222_pairwise_regression_stdout.txt 2>&1
+
+      - name: Run rigorous pairwise upper bound
+        shell: bash
+        run: |
+          set +e
+          cd private-research
+          python experiments/222_pairwise_capacity_upper.py --kmax 256             > results/222_pairwise_capacity_upper_stdout.txt 2>&1
+          status=$?
+          echo "$status" > results/222_runner_exit_code.txt
+          exit 0
+
+      - name: Upload short-lived result artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: exp222-result
+          path: |
+            private-research/results/222_pairwise_capacity_upper.json
+            private-research/results/222_pairwise_capacity_upper_stdout.txt
+            private-research/results/222_pairwise_regression_stdout.txt
+            private-research/results/222_runner_exit_code.txt
+          if-no-files-found: warn
+          retention-days: 1
+
+      - name: Reflect experiment exit status
+        run: |
+          code="$(cat private-research/results/222_runner_exit_code.txt)"
+          test "$code" = "0"
