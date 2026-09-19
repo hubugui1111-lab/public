@@ -14,7 +14,13 @@ on:
         required: true
         default: complete
         type: choice
-        options: [complete, scatter]
+        options: [complete, scatter, model0]
+      kkot_pool:
+        description: Public KKOT pool size shared by candidate and baseline
+        required: true
+        default: '0'
+        type: choice
+        options: ['0', '256']
 
 permissions:
   contents: read
@@ -26,16 +32,18 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: ${{ fromJSON(inputs.checks == 'scatter' && '["scatter"]' || '["model0","model1","boundaries","lookup","slots","scatter"]') }}
+        suite: ${{ fromJSON(inputs.checks == 'scatter' && '["scatter"]' || inputs.checks == 'model0' && '["model0"]' || '["model0","model1","boundaries","lookup","slots","scatter"]') }}
     env:
       TDA_COMMIT: ${{ inputs.private_ref }}
       AUDIT_SUITE: ${{ matrix.suite }}
+      KKOT_POOL: ${{ inputs.kkot_pool }}
     steps:
       - name: Validate immutable source reference
         shell: bash
         run: |
           set -euo pipefail
           [[ "$TDA_COMMIT" =~ ^[0-9a-f]{40}$ ]] || exit 2
+          [[ "$KKOT_POOL" = 0 || "$KKOT_POOL" = 256 ]] || exit 2
           TASK_DIR="$RUNNER_TEMP/h0-audit-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           echo "TASK_DIR=$TASK_DIR" >> "$GITHUB_ENV"
           umask 077
@@ -114,6 +122,7 @@ jobs:
             --report "$TASK_DIR/summary.json" \
             --source-sha "$TDA_COMMIT" \
             --suite "$AUDIT_SUITE" \
+            --kkot-pool "$KKOT_POOL" \
             --timeout 600 \
             > "$TASK_DIR/driver.log" 2>&1
 

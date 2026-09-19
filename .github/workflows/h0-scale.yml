@@ -9,6 +9,12 @@ on:
         description: Full audited private TDA commit SHA
         required: true
         type: string
+      kkot_pool:
+        description: Public KKOT pool size shared by candidate and baseline
+        required: true
+        default: '0'
+        type: choice
+        options: ['0', '256']
 
 permissions:
   contents: read
@@ -24,12 +30,14 @@ jobs:
     env:
       TDA_COMMIT: ${{ inputs.private_ref }}
       AUDIT_VARIANT: ${{ matrix.variant }}
+      KKOT_POOL: ${{ inputs.kkot_pool }}
     steps:
       - name: Validate immutable source reference
         shell: bash
         run: |
           set -euo pipefail
           [[ "$TDA_COMMIT" =~ ^[0-9a-f]{40}$ ]] || exit 2
+          [[ "$KKOT_POOL" = 0 || "$KKOT_POOL" = 256 ]] || exit 2
           TASK_DIR="$RUNNER_TEMP/h0-audit-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           echo "TASK_DIR=$TASK_DIR" >> "$GITHUB_ENV"
           umask 077
@@ -108,6 +116,7 @@ jobs:
             --report "$TASK_DIR/summary.json" \
             --source-sha "$TDA_COMMIT" \
             --variant "$AUDIT_VARIANT" \
+            --kkot-pool "$KKOT_POOL" \
             --timeout 3600 \
             > "$TASK_DIR/driver.log" 2>&1
 
