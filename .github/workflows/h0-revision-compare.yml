@@ -155,7 +155,7 @@ jobs:
                 -DCMAKE_PREFIX_PATH=/usr/lib/x86_64-linux-gnu/cmake/eigen3 \
                 -DCMAKE_BUILD_TYPE=Release \
                 -DDEALERLESS_BUILD_TESTS=OFF &&
-              cmake --build "$TASK_DIR/build-$revision" --target h0_dealerless_adapter --parallel 2;
+              cmake --build "$TASK_DIR/build-$revision" --target h0_dealerless_adapter h0_transport_regression --parallel 2;
             } > "$TASK_DIR/build-$revision.log" 2>&1; then
               "$TASK_DIR/venv/bin/python" private-controller/scripts/summarize_h0_build_failure.py \
                 "$TASK_DIR/build-$revision.log" "$TASK_DIR/summary.json"
