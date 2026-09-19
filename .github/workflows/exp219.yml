@@ -25,7 +25,7 @@ jobs:
         with:
           repository: hubugui1111-lab/tda-ppml-research
           token: ${{ secrets.PRIVATE_REPO_TOKEN }}
-          ref: 52f5e385cea4ec8b914c23985cd3dbdb8e1c41bc
+          ref: 9f2b85ccd8bf08a7a3c1a54587e24a420e1a957d
           path: private-research
           fetch-depth: 1
           persist-credentials: false
