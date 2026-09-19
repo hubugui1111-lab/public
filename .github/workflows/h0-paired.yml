@@ -33,6 +33,12 @@ on:
         default: dpf
         type: choice
         options: [dpf, dpf-bits]
+      lookup:
+        description: Fixed public private-leaf lookup implementation
+        required: true
+        default: mux
+        type: choice
+        options: [mux, ot4]
 
 permissions:
   contents: read
@@ -52,6 +58,7 @@ jobs:
       GATHER_MODE: ${{ inputs.gather }}
       MATCHED_TRIALS: ${{ inputs.trials }}
       SCATTER_MODE: ${{ inputs.scatter }}
+      LOOKUP_MODE: ${{ inputs.lookup }}
     steps:
       - name: Validate immutable source reference
         shell: bash
@@ -62,6 +69,7 @@ jobs:
           [[ "$GATHER_MODE" = dpf || "$GATHER_MODE" = affine ]] || exit 2
           [[ "$MATCHED_TRIALS" = 1 || "$MATCHED_TRIALS" = 3 || "$MATCHED_TRIALS" = 5 ]] || exit 2
           [[ "$SCATTER_MODE" = dpf || "$SCATTER_MODE" = dpf-bits ]] || exit 2
+          [[ "$LOOKUP_MODE" = mux || "$LOOKUP_MODE" = ot4 ]] || exit 2
           TASK_DIR="$RUNNER_TEMP/h0-audit-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           echo "TASK_DIR=$TASK_DIR" >> "$GITHUB_ENV"
           umask 077
@@ -143,6 +151,7 @@ jobs:
             --kkot-pool "$KKOT_POOL" \
             --gather "$GATHER_MODE" \
             --scatter "$SCATTER_MODE" \
+            --lookup "$LOOKUP_MODE" \
             --trials "$MATCHED_TRIALS" \
             --timeout 3600 \
             > "$TASK_DIR/driver.log" 2>&1
