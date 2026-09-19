@@ -27,6 +27,12 @@ on:
         default: beaver
         type: choice
         options: [beaver, scalar-cot]
+      inherited_batch:
+        description: Public inherited-value MUX grouping; shared by candidate and baseline
+        required: true
+        default: split
+        type: choice
+        options: [split, fused]
       trials:
         description: Matched fresh-session pairs on the same runner
         required: true
@@ -75,6 +81,7 @@ jobs:
       KKOT_POOL: ${{ inputs.kkot_pool }}
       GATHER_MODE: ${{ inputs.gather }}
       H0_AFFINE_BACKEND: ${{ inputs.h0_affine_backend }}
+      INHERITED_BATCH: ${{ inputs.inherited_batch }}
       MATCHED_TRIALS: ${{ inputs.trials }}
       QUERY_COUNT: ${{ inputs.queries }}
       OMP_WAIT_MODE: ${{ inputs.omp_wait }}
@@ -89,6 +96,7 @@ jobs:
           [[ "$KKOT_POOL" = 0 || "$KKOT_POOL" = 256 ]] || exit 2
           [[ "$GATHER_MODE" = dpf || "$GATHER_MODE" = affine ]] || exit 2
           [[ "$H0_AFFINE_BACKEND" = beaver || "$H0_AFFINE_BACKEND" = scalar-cot ]] || exit 2
+          [[ "$INHERITED_BATCH" = split || "$INHERITED_BATCH" = fused ]] || exit 2
           if [[ "$H0_AFFINE_BACKEND" = scalar-cot ]]; then
             [[ "$GATHER_MODE" = affine ]] || exit 2
           fi
@@ -102,6 +110,9 @@ jobs:
           fi
           if [[ "$LOOKUP_MODE" = ot4-long ]]; then
             [[ "$GATHER_MODE" = affine && ( "$SCATTER_MODE" = waksman || "$SCATTER_MODE" = orcompact || "$SCATTER_MODE" = orcompact-masked ) ]] || exit 2
+          fi
+          if [[ "$INHERITED_BATCH" = fused ]]; then
+            [[ "$GATHER_MODE" = affine && "$LOOKUP_MODE" = ot4-long && ( "$SCATTER_MODE" = orcompact || "$SCATTER_MODE" = orcompact-masked ) ]] || exit 2
           fi
           TASK_DIR="$RUNNER_TEMP/h0-audit-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           echo "TASK_DIR=$TASK_DIR" >> "$GITHUB_ENV"
@@ -184,6 +195,7 @@ jobs:
             --kkot-pool "$KKOT_POOL" \
             --gather "$GATHER_MODE" \
             --h0-affine-backend "$H0_AFFINE_BACKEND" \
+            --inherited-batch "$INHERITED_BATCH" \
             --scatter "$SCATTER_MODE" \
             --lookup "$LOOKUP_MODE" \
             --trials "$MATCHED_TRIALS" \
