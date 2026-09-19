@@ -21,6 +21,12 @@ on:
         default: dpf
         type: choice
         options: [dpf, affine]
+      h0_affine_backend:
+        description: H0-only affine product backend; common affine stays unchanged
+        required: true
+        default: beaver
+        type: choice
+        options: [beaver, scalar-cot]
       trials:
         description: Matched fresh-session pairs on the same runner
         required: true
@@ -68,6 +74,7 @@ jobs:
       AUDIT_WORKLOAD: ${{ matrix.workload }}
       KKOT_POOL: ${{ inputs.kkot_pool }}
       GATHER_MODE: ${{ inputs.gather }}
+      H0_AFFINE_BACKEND: ${{ inputs.h0_affine_backend }}
       MATCHED_TRIALS: ${{ inputs.trials }}
       QUERY_COUNT: ${{ inputs.queries }}
       OMP_WAIT_MODE: ${{ inputs.omp_wait }}
@@ -81,6 +88,10 @@ jobs:
           [[ "$TDA_COMMIT" =~ ^[0-9a-f]{40}$ ]] || exit 2
           [[ "$KKOT_POOL" = 0 || "$KKOT_POOL" = 256 ]] || exit 2
           [[ "$GATHER_MODE" = dpf || "$GATHER_MODE" = affine ]] || exit 2
+          [[ "$H0_AFFINE_BACKEND" = beaver || "$H0_AFFINE_BACKEND" = scalar-cot ]] || exit 2
+          if [[ "$H0_AFFINE_BACKEND" = scalar-cot ]]; then
+            [[ "$GATHER_MODE" = affine ]] || exit 2
+          fi
           [[ "$MATCHED_TRIALS" = 1 || "$MATCHED_TRIALS" = 3 || "$MATCHED_TRIALS" = 5 ]] || exit 2
           [[ "$QUERY_COUNT" = 1 || "$QUERY_COUNT" = 8 || "$QUERY_COUNT" = 32 ]] || exit 2
           [[ "$OMP_WAIT_MODE" = inherited || "$OMP_WAIT_MODE" = passive ]] || exit 2
@@ -172,6 +183,7 @@ jobs:
             --workload "$AUDIT_WORKLOAD" \
             --kkot-pool "$KKOT_POOL" \
             --gather "$GATHER_MODE" \
+            --h0-affine-backend "$H0_AFFINE_BACKEND" \
             --scatter "$SCATTER_MODE" \
             --lookup "$LOOKUP_MODE" \
             --trials "$MATCHED_TRIALS" \

@@ -22,6 +22,7 @@ on:
           - leaf-lookup
           - scatter-network
           - scatter-execution
+          - affine-backend
       revision_a:
         description: Immutable A (historical OT24 default; private_ref for same-source modes)
         required: true
@@ -60,7 +61,7 @@ jobs:
           [[ "$REVISION_B_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 2
           case "$AUDIT_COMPARISON" in
             ot-packing) [[ "$REVISION_A_SHA" != "$REVISION_B_SHA" ]] || exit 2 ;;
-            leaf-lookup|scatter-network|scatter-execution)
+            leaf-lookup|scatter-network|scatter-execution|affine-backend)
               [[ "$REVISION_A_SHA" = "$CONTROLLER_SHA" && "$REVISION_B_SHA" = "$CONTROLLER_SHA" ]] || exit 2 ;;
             *) exit 2 ;;
           esac
