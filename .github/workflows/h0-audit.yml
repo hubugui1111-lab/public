@@ -9,6 +9,12 @@ on:
         description: Full audited private TDA commit SHA
         required: true
         type: string
+      checks:
+        description: Complete integration or focused scatter regression
+        required: true
+        default: complete
+        type: choice
+        options: [complete, scatter]
 
 permissions:
   contents: read
@@ -20,7 +26,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: [model0, model1, boundaries, lookup, slots]
+        suite: ${{ fromJSON(inputs.checks == 'scatter' && '["scatter"]' || '["model0","model1","boundaries","lookup","slots"]') }}
     env:
       TDA_COMMIT: ${{ inputs.private_ref }}
       AUDIT_SUITE: ${{ matrix.suite }}
