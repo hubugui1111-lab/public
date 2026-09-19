@@ -20,7 +20,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: [models, boundaries, lookup]
+        suite: [model0, model1, boundaries, lookup, slots]
     env:
       TDA_COMMIT: ${{ inputs.private_ref }}
       AUDIT_SUITE: ${{ matrix.suite }}
@@ -107,7 +107,7 @@ jobs:
             --report "$TASK_DIR/summary.json" \
             --source-sha "$TDA_COMMIT" \
             --suite "$AUDIT_SUITE" \
-            --timeout 300 \
+            --timeout 600 \
             > "$TASK_DIR/driver.log" 2>&1
 
       # A public Actions artifact is not private storage. Only the driver's
