@@ -1,6 +1,6 @@
 # TEMPLATE ONLY: temporarily install in the public compute repository.
 # Research source and raw logs must never enter public Git or public artifacts.
-name: h0-dealerless-adapter-audit
+name: h0-paired-scale-audit
 
 on:
   workflow_dispatch:
@@ -9,18 +9,24 @@ on:
         description: Full audited private TDA commit SHA
         required: true
         type: string
-      checks:
-        description: Complete integration or focused component regression
-        required: true
-        default: complete
-        type: choice
-        options: [complete, scatter, model0, affine]
       kkot_pool:
         description: Public KKOT pool size shared by candidate and baseline
         required: true
         default: '0'
         type: choice
         options: ['0', '256']
+      gather:
+        description: Fixed public gather implementation
+        required: true
+        default: dpf
+        type: choice
+        options: [dpf, affine]
+      trials:
+        description: Matched fresh-session pairs on the same runner
+        required: true
+        default: '3'
+        type: choice
+        options: ['1', '3', '5']
 
 permissions:
   contents: read
@@ -28,15 +34,17 @@ permissions:
 jobs:
   audit:
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 75
     strategy:
       fail-fast: false
       matrix:
-        suite: ${{ fromJSON(inputs.checks == 'scatter' && '["scatter"]' || inputs.checks == 'model0' && '["model0"]' || inputs.checks == 'affine' && '["affine"]' || '["model0","model1","boundaries","lookup","slots","scatter","affine"]') }}
+        workload: [hit, fallback]
     env:
       TDA_COMMIT: ${{ inputs.private_ref }}
-      AUDIT_SUITE: ${{ matrix.suite }}
+      AUDIT_WORKLOAD: ${{ matrix.workload }}
       KKOT_POOL: ${{ inputs.kkot_pool }}
+      GATHER_MODE: ${{ inputs.gather }}
+      MATCHED_TRIALS: ${{ inputs.trials }}
     steps:
       - name: Validate immutable source reference
         shell: bash
@@ -44,6 +52,8 @@ jobs:
           set -euo pipefail
           [[ "$TDA_COMMIT" =~ ^[0-9a-f]{40}$ ]] || exit 2
           [[ "$KKOT_POOL" = 0 || "$KKOT_POOL" = 256 ]] || exit 2
+          [[ "$GATHER_MODE" = dpf || "$GATHER_MODE" = affine ]] || exit 2
+          [[ "$MATCHED_TRIALS" = 1 || "$MATCHED_TRIALS" = 3 || "$MATCHED_TRIALS" = 5 ]] || exit 2
           TASK_DIR="$RUNNER_TEMP/h0-audit-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           echo "TASK_DIR=$TASK_DIR" >> "$GITHUB_ENV"
           umask 077
@@ -117,13 +127,15 @@ jobs:
         run: |
           set -euo pipefail
           umask 077
-          "$TASK_DIR/venv/bin/python" private-research/scripts/run_h0_dealerless_audit.py \
+          "$TASK_DIR/venv/bin/python" private-research/scripts/run_h0_paired_scale_audit.py \
             --binary "$TASK_DIR/build/h0_dealerless_adapter" \
             --report "$TASK_DIR/summary.json" \
             --source-sha "$TDA_COMMIT" \
-            --suite "$AUDIT_SUITE" \
+            --workload "$AUDIT_WORKLOAD" \
             --kkot-pool "$KKOT_POOL" \
-            --timeout 600 \
+            --gather "$GATHER_MODE" \
+            --trials "$MATCHED_TRIALS" \
+            --timeout 3600 \
             > "$TASK_DIR/driver.log" 2>&1
 
       # A public Actions artifact is not private storage. Only the driver's
@@ -132,7 +144,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: h0-dealerless-audit-${{ matrix.suite }}-${{ github.run_id }}-${{ github.run_attempt }}
+          name: h0-paired-${{ matrix.workload }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ env.TASK_DIR }}/summary.json
           if-no-files-found: error
           retention-days: 1
