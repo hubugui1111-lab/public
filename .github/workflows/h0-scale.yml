@@ -1,0 +1,134 @@
+# TEMPLATE ONLY: temporarily install in the public compute repository.
+# Research source and raw logs must never enter public Git or public artifacts.
+name: h0-complete-scale-audit
+
+on:
+  workflow_dispatch:
+    inputs:
+      private_ref:
+        description: Full audited private TDA commit SHA
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [baseline, hit, fallback]
+    env:
+      TDA_COMMIT: ${{ inputs.private_ref }}
+      AUDIT_VARIANT: ${{ matrix.variant }}
+    steps:
+      - name: Validate immutable source reference
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$TDA_COMMIT" =~ ^[0-9a-f]{40}$ ]] || exit 2
+          TASK_DIR="$RUNNER_TEMP/h0-audit-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          echo "TASK_DIR=$TASK_DIR" >> "$GITHUB_ENV"
+          umask 077
+          mkdir -p "$TASK_DIR"
+          printf '{"schema_version":1,"pass":false,"stage":"not_run"}\n' > "$TASK_DIR/summary.json"
+
+      - name: Checkout private TDA source read-only
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: hubugui1111-lab/tda-ppml-research
+          ref: ${{ inputs.private_ref }}
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          path: private-research
+          fetch-depth: 1
+          persist-credentials: false
+          submodules: false
+
+      - name: Verify source checkout and install dependencies quietly
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C private-research rev-parse HEAD)" = "$TDA_COMMIT"
+          if ! {
+            sudo apt-get update -qq &&
+            sudo apt-get install -y -qq clang libeigen3-dev libgmp-dev libssl-dev libomp-dev python3-venv &&
+            python3 -m venv "$TASK_DIR/venv" &&
+            "$TASK_DIR/venv/bin/python" -m pip install --disable-pip-version-check numpy==2.1.3 pytest==8.3.5
+          } > "$TASK_DIR/dependencies.log" 2>&1; then
+            printf '{"schema_version":1,"pass":false,"stage":"dependencies_failed"}\n' > "$TASK_DIR/summary.json"
+            exit 1
+          fi
+
+      - name: Fetch and verify pinned published implementations quietly
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! {
+            git clone --filter=blob:none https://github.com/mpc-msri/EzPC.git /tmp/EzPC &&
+            git -C /tmp/EzPC checkout --detach f24bf3e022dde3493cf0ffe3ebd92dd73936b734 &&
+            test "$(git -C /tmp/EzPC rev-parse HEAD)" = f24bf3e022dde3493cf0ffe3ebd92dd73936b734 &&
+            git clone --filter=blob:none https://github.com/xingpz2008/dealerless-FSS_public.git /tmp/dealerless-fss &&
+            git -C /tmp/dealerless-fss checkout --detach e8fefb537253ee5b0317ea484c934656f09a66f5 &&
+            test "$(git -C /tmp/dealerless-fss rev-parse HEAD)" = e8fefb537253ee5b0317ea484c934656f09a66f5
+          } > "$TASK_DIR/fetch.log" 2>&1; then
+            printf '{"schema_version":1,"pass":false,"stage":"fetch_failed"}\n' > "$TASK_DIR/summary.json"
+            exit 1
+          fi
+
+      - name: Build adapter without publishing compiler diagnostics
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! {
+            cmake -S private-research/experiments/230_h0_dealerless_adapter \
+              -B "$TASK_DIR/build" \
+              -DDEALERLESS_FSS_ROOT=/tmp/dealerless-fss \
+              -DEZPC_ROOT=/tmp/EzPC \
+              -DCMAKE_CXX_COMPILER=clang++ \
+              -DCMAKE_PREFIX_PATH=/usr/lib/x86_64-linux-gnu/cmake/eigen3 \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DDEALERLESS_BUILD_TESTS=OFF &&
+            cmake --build "$TASK_DIR/build" --target h0_dealerless_adapter --parallel 2
+          } > "$TASK_DIR/build.log" 2>&1; then
+            printf '{"schema_version":1,"pass":false,"stage":"build_failed"}\n' > "$TASK_DIR/summary.json"
+            exit 1
+          fi
+
+      - name: Run independent two-party checks quietly
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          "$TASK_DIR/venv/bin/python" private-research/scripts/run_h0_scale_audit.py \
+            --binary "$TASK_DIR/build/h0_dealerless_adapter" \
+            --report "$TASK_DIR/summary.json" \
+            --source-sha "$TDA_COMMIT" \
+            --variant "$AUDIT_VARIANT" \
+            --timeout 3600 \
+            > "$TASK_DIR/driver.log" 2>&1
+
+      # A public Actions artifact is not private storage. Only the driver's
+      # allowlisted pass/fail metadata is uploaded, with no raw outputs/shares.
+      - name: Upload short-lived sanitized audit summary
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: h0-scale-${{ matrix.variant }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.TASK_DIR }}/summary.json
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Remove private scratch data from runner
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$TASK_DIR" in "$RUNNER_TEMP"/h0-audit-*) ;; *) exit 2 ;; esac
+          rm -rf -- "$TASK_DIR" "$GITHUB_WORKSPACE/private-research" /tmp/EzPC /tmp/dealerless-fss
+
+# Controller: inspect summary and exit statuses, then delete artifact AND run
+# logs and remove this temporary public workflow. Deleting the workflow alone
+# does not delete historical Actions logs. Scratch summaries are not paper data.
