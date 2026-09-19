@@ -14,7 +14,7 @@ on:
         required: true
         default: complete
         type: choice
-        options: [complete, scatter, model0, affine]
+        options: [complete, scatter, model0, affine, scatter-bits]
       kkot_pool:
         description: Public KKOT pool size shared by candidate and baseline
         required: true
@@ -32,7 +32,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: ${{ fromJSON(inputs.checks == 'scatter' && '["scatter"]' || inputs.checks == 'model0' && '["model0"]' || inputs.checks == 'affine' && '["affine"]' || '["model0","model1","boundaries","lookup","slots","scatter","affine"]') }}
+        suite: ${{ fromJSON(inputs.checks == 'scatter' && '["scatter"]' || inputs.checks == 'model0' && '["model0"]' || inputs.checks == 'affine' && '["affine"]' || inputs.checks == 'scatter-bits' && '["scatter-bits"]' || '["model0","model1","boundaries","lookup","slots","scatter","affine","scatter-bits"]') }}
     env:
       TDA_COMMIT: ${{ inputs.private_ref }}
       AUDIT_SUITE: ${{ matrix.suite }}
