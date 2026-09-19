@@ -14,7 +14,7 @@ on:
         required: true
         default: complete
         type: choice
-        options: [complete, scatter, model0, affine, scatter-bits, ot4, batch-dpf]
+        options: [complete, scatter, model0, affine, scatter-bits, ot4, batch-dpf, waksman]
       kkot_pool:
         description: Public KKOT pool size shared by candidate and baseline
         required: true
@@ -32,7 +32,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: ${{ fromJSON(inputs.checks == 'scatter' && '["scatter"]' || inputs.checks == 'model0' && '["model0"]' || inputs.checks == 'affine' && '["affine"]' || inputs.checks == 'scatter-bits' && '["scatter-bits"]' || inputs.checks == 'ot4' && '["ot4"]' || inputs.checks == 'batch-dpf' && '["batch-dpf"]' || '["model0","model1","boundaries","lookup","slots","scatter","affine","scatter-bits","ot4","batch-dpf"]') }}
+        suite: ${{ fromJSON(inputs.checks == 'scatter' && '["scatter"]' || inputs.checks == 'model0' && '["model0"]' || inputs.checks == 'affine' && '["affine"]' || inputs.checks == 'scatter-bits' && '["scatter-bits"]' || inputs.checks == 'ot4' && '["ot4"]' || inputs.checks == 'batch-dpf' && '["batch-dpf"]' || inputs.checks == 'waksman' && '["waksman"]' || '["model0","model1","boundaries","lookup","slots","scatter","affine","scatter-bits","ot4","batch-dpf","waksman"]') }}
     env:
       TDA_COMMIT: ${{ inputs.private_ref }}
       AUDIT_SUITE: ${{ matrix.suite }}
