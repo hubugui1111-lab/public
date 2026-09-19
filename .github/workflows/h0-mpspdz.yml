@@ -74,14 +74,40 @@ jobs:
             printf '{"schema_version":1,"pass":false,"stage":"fetch_failed"}\n' > "$TASK_DIR/summary.json"
             exit 1
           fi
-          if ! {
+          build_status=0
+          {
             if [ ! -x "$TASK_DIR/spdz/semi-party.x" ]; then
-              printf '%s\n' 'USE_KOS = 1' >> "$TASK_DIR/spdz/CONFIG.mine" &&
-              timeout --signal=TERM --kill-after=10s 1200s make -C "$TASK_DIR/spdz" -j2 semi-party.x
-            fi &&
-            test -x "$TASK_DIR/spdz/semi-party.x"
-          } > "$TASK_DIR/build.log" 2>&1; then
-            printf '{"schema_version":1,"pass":false,"stage":"build_failed"}\n' > "$TASK_DIR/summary.json"
+              printf '%s\n' 'USE_KOS = 1' >> "$TASK_DIR/spdz/CONFIG.mine" || build_status=$?
+              if [ "$build_status" -eq 0 ]; then
+                if timeout --signal=TERM --kill-after=10s 1200s make -C "$TASK_DIR/spdz" -j2 semi-party.x; then
+                  build_status=0
+                else
+                  build_status=$?
+                fi
+              fi
+            fi
+            if [ "$build_status" -eq 0 ] && [ ! -x "$TASK_DIR/spdz/semi-party.x" ]; then
+              build_status=126
+            fi
+          } > "$TASK_DIR/build.log" 2>&1
+          if [ "$build_status" -ne 0 ]; then
+            # Only fixed categories/exit status may leave the public dependency
+            # log. Never copy matching text, filenames, or compiler diagnostics.
+            error_code=dependency_build_unknown
+            if [ "$build_status" -eq 124 ]; then
+              error_code=dependency_build_timeout
+            elif grep -Eiq 'out of memory|Cannot allocate memory|Killed signal terminated program|LLVM ERROR:.*memory|clang.*Killed' "$TASK_DIR/build.log"; then
+              error_code=dependency_build_oom
+            elif grep -Eiq 'Permission denied|Operation not permitted' "$TASK_DIR/build.log"; then
+              error_code=dependency_build_permission
+            elif grep -Eiq '(clang\+\+|g\+\+|gcc|cc|c\+\+): (command not found|not found)|unable to execute command: Executable' "$TASK_DIR/build.log"; then
+              error_code=dependency_build_missing_compiler
+            elif grep -Eiq 'fatal error:.*(file not found|No such file or directory)' "$TASK_DIR/build.log"; then
+              error_code=dependency_build_missing_header
+            elif grep -Eiq 'cannot find -l|library not found for -l|cannot open shared object file' "$TASK_DIR/build.log"; then
+              error_code=dependency_build_missing_library
+            fi
+            printf '{"schema_version":1,"pass":false,"stage":"build_failed","error_code":"%s","build_exit_code":%s}\n' "$error_code" "$build_status" > "$TASK_DIR/summary.json"
             exit 1
           fi
 
