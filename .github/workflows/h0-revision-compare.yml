@@ -1,7 +1,7 @@
 # TEMPLATE ONLY: ephemeral public compute, never publish private source or logs.
 # Replay historical unpruned defaults with controller AND template from 5150a42;
 # that older driver does not accept this template's new --comparison argument.
-# New controllers retain their strict work-count schema; both same-source modes use
+# New controllers retain their strict work-count schema; all same-source modes use
 # the same new private_ref for all three checkouts, with two independent builds.
 name: h0-revision-compare-audit
 
@@ -13,7 +13,7 @@ on:
         required: true
         type: string
       comparison:
-        description: Public axis; leaf-lookup and scatter-network require both revisions equal private_ref
+        description: Public axis; all modes except ot-packing require both revisions equal private_ref
         required: true
         default: ot-packing
         type: choice
@@ -21,6 +21,7 @@ on:
           - ot-packing
           - leaf-lookup
           - scatter-network
+          - scatter-execution
       revision_a:
         description: Immutable A (historical OT24 default; private_ref for same-source modes)
         required: true
@@ -59,7 +60,7 @@ jobs:
           [[ "$REVISION_B_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 2
           case "$AUDIT_COMPARISON" in
             ot-packing) [[ "$REVISION_A_SHA" != "$REVISION_B_SHA" ]] || exit 2 ;;
-            leaf-lookup|scatter-network)
+            leaf-lookup|scatter-network|scatter-execution)
               [[ "$REVISION_A_SHA" = "$CONTROLLER_SHA" && "$REVISION_B_SHA" = "$CONTROLLER_SHA" ]] || exit 2 ;;
             *) exit 2 ;;
           esac

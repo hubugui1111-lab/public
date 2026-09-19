@@ -44,13 +44,13 @@ on:
         required: true
         default: dpf
         type: choice
-        options: [dpf, dpf-bits, dpf-batch, waksman]
+        options: [dpf, dpf-bits, dpf-batch, waksman, orcompact, orcompact-masked]
       lookup:
         description: Fixed public private-leaf lookup implementation
         required: true
         default: mux
         type: choice
-        options: [mux, ot4]
+        options: [mux, ot4, ot4-long]
 
 permissions:
   contents: read
@@ -84,10 +84,13 @@ jobs:
           [[ "$MATCHED_TRIALS" = 1 || "$MATCHED_TRIALS" = 3 || "$MATCHED_TRIALS" = 5 ]] || exit 2
           [[ "$QUERY_COUNT" = 1 || "$QUERY_COUNT" = 8 || "$QUERY_COUNT" = 32 ]] || exit 2
           [[ "$OMP_WAIT_MODE" = inherited || "$OMP_WAIT_MODE" = passive ]] || exit 2
-          [[ "$SCATTER_MODE" = dpf || "$SCATTER_MODE" = dpf-bits || "$SCATTER_MODE" = dpf-batch || "$SCATTER_MODE" = waksman ]] || exit 2
-          [[ "$LOOKUP_MODE" = mux || "$LOOKUP_MODE" = ot4 ]] || exit 2
-          if [[ "$SCATTER_MODE" = waksman ]]; then
-            [[ "$GATHER_MODE" = affine && "$LOOKUP_MODE" = ot4 ]] || exit 2
+          [[ "$SCATTER_MODE" = dpf || "$SCATTER_MODE" = dpf-bits || "$SCATTER_MODE" = dpf-batch || "$SCATTER_MODE" = waksman || "$SCATTER_MODE" = orcompact || "$SCATTER_MODE" = orcompact-masked ]] || exit 2
+          [[ "$LOOKUP_MODE" = mux || "$LOOKUP_MODE" = ot4 || "$LOOKUP_MODE" = ot4-long ]] || exit 2
+          if [[ "$SCATTER_MODE" = waksman || "$SCATTER_MODE" = orcompact || "$SCATTER_MODE" = orcompact-masked ]]; then
+            [[ "$GATHER_MODE" = affine && ( "$LOOKUP_MODE" = ot4 || "$LOOKUP_MODE" = ot4-long ) ]] || exit 2
+          fi
+          if [[ "$LOOKUP_MODE" = ot4-long ]]; then
+            [[ "$GATHER_MODE" = affine && ( "$SCATTER_MODE" = waksman || "$SCATTER_MODE" = orcompact || "$SCATTER_MODE" = orcompact-masked ) ]] || exit 2
           fi
           TASK_DIR="$RUNNER_TEMP/h0-audit-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           echo "TASK_DIR=$TASK_DIR" >> "$GITHUB_ENV"
