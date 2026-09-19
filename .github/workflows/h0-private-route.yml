@@ -20,7 +20,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: hubugui1111-lab/tda-ppml-research
-          ref: b903ff78976ed741cb27d4194fe24f1184c91c11
+          ref: 1211861916adc7f468310882bd9356faf477862f
           token: ${{ secrets.PRIVATE_REPO_TOKEN }}
           path: private-research
           fetch-depth: 1
@@ -37,8 +37,11 @@ jobs:
           tar -xJf /tmp/mp-spdz-0.4.3.tar.xz -C /tmp
           sudo apt-get update -qq
           sudo apt-get install -y -qq build-essential libboost-all-dev libgmp-dev libntl-dev libsodium-dev libssl-dev libtool >/dev/null
-          SPDZ_DIR="$(find /tmp -maxdepth 3 -type f -name compile.py -print -quit | xargs dirname)"
-          test -n "$SPDZ_DIR"
+          SPDZ_DIR=/tmp/MP-SPDZ-0.4.3
+          if [ ! -f "$SPDZ_DIR/compile.py" ]; then
+            SPDZ_DIR=/tmp/mp-spdz-0.4.3
+          fi
+          test -f "$SPDZ_DIR/compile.py"
           if [ ! -x "$SPDZ_DIR/semi-party.x" ]; then
             printf '%s\n' 'USE_KOS = 1' >> "$SPDZ_DIR/CONFIG.mine"
             make -C "$SPDZ_DIR" -j2 semi-party.x
@@ -68,7 +71,7 @@ jobs:
           fi
           printf '%s\n' "$run_status" > results/225_private_h0_route_e2e/runner_exit_code.txt
           printf '%s\n' "$GITHUB_RUN_ID" > results/225_private_h0_route_e2e/public_run_id.txt
-          printf '%s\n' 'b903ff78976ed741cb27d4194fe24f1184c91c11' > results/225_private_h0_route_e2e/private_head.txt
+          printf '%s\n' '1211861916adc7f468310882bd9356faf477862f' > results/225_private_h0_route_e2e/private_head.txt
           exit 0
 
       - name: Upload short-lived private result artifact
