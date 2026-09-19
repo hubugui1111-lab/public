@@ -19,13 +19,14 @@ jobs:
     timeout-minutes: 35
     env:
       TDA_COMMIT: ${{ inputs.private_ref }}
-      TASK_DIR: ${{ runner.temp }}/h0-audit-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - name: Validate immutable source reference
         shell: bash
         run: |
           set -euo pipefail
           [[ "$TDA_COMMIT" =~ ^[0-9a-f]{40}$ ]] || exit 2
+          TASK_DIR="$RUNNER_TEMP/h0-audit-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          echo "TASK_DIR=$TASK_DIR" >> "$GITHUB_ENV"
           umask 077
           mkdir -p "$TASK_DIR"
           printf '{"schema_version":1,"pass":false,"stage":"not_run"}\n' > "$TASK_DIR/summary.json"
