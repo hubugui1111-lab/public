@@ -1,4 +1,4 @@
-name: exp221-capacity-selected-h0
+name: exp221-anchor-free-scaling
 
 on:
   push:
@@ -13,19 +13,20 @@ permissions:
 jobs:
   exp221:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     env:
       HF_HUB_DISABLE_TELEMETRY: "1"
       HF_HUB_DISABLE_XET: "1"
       TOKENIZERS_PARALLELISM: "false"
     steps:
       - uses: actions/checkout@v4
+
       - name: Checkout private research repo READ ONLY
         uses: actions/checkout@v4
         with:
           repository: hubugui1111-lab/tda-ppml-research
           token: ${{ secrets.PRIVATE_REPO_TOKEN }}
-          ref: d51e09690832ea5e78a83f81b137feffde936b3a
+          ref: fdec65b080a3f04df1025c90df44f37f4ad36f68
           path: private-research
           fetch-depth: 1
           persist-credentials: false
@@ -45,12 +46,12 @@ jobs:
           mkdir -p results
           python experiments/215_collect_clean_opt_sign_pool.py --n-build 8192 --n-eval 1024             > results/221_collect_sign_pool_stdout.txt 2>&1
 
-      - name: Run capacity-selected H0 comparison
+      - name: Run anchor-free scaling
         shell: bash
         run: |
           set +e
           cd private-research
-          python experiments/220_capacity_selected_h0.py --exact-seconds 20             > results/221_capacity_selected_h0_stdout.txt 2>&1
+          python experiments/221_anchor_free_capacity_scaling.py             > results/221_anchor_free_capacity_scaling_stdout.txt 2>&1
           status=$?
           echo "$status" > results/221_runner_exit_code.txt
           exit 0
@@ -61,8 +62,8 @@ jobs:
         with:
           name: exp221-result
           path: |
-            private-research/results/220_capacity_selected_h0.json
-            private-research/results/221_capacity_selected_h0_stdout.txt
+            private-research/results/221_anchor_free_capacity_scaling.json
+            private-research/results/221_anchor_free_capacity_scaling_stdout.txt
             private-research/results/221_runner_exit_code.txt
             private-research/results/215_clean_sign_pool.json
             private-research/results/221_collect_sign_pool_stdout.txt
