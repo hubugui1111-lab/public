@@ -26,7 +26,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: ${{ fromJSON(inputs.checks == 'scatter' && '["scatter"]' || '["model0","model1","boundaries","lookup","slots"]') }}
+        suite: ${{ fromJSON(inputs.checks == 'scatter' && '["scatter"]' || '["model0","model1","boundaries","lookup","slots","scatter"]') }}
     env:
       TDA_COMMIT: ${{ inputs.private_ref }}
       AUDIT_SUITE: ${{ matrix.suite }}
