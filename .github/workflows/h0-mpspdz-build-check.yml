@@ -1,0 +1,34 @@
+name: h0-mpspdz-public-dependency-build-check
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Fetch only published MP-SPDZ and system dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          TASK_DIR="$RUNNER_TEMP/h0-mpspdz-public-build"
+          echo "TASK_DIR=$TASK_DIR" >> "$GITHUB_ENV"
+          mkdir -p "$TASK_DIR/spdz"
+          sudo apt-get update -qq > "$TASK_DIR/apt.log" 2>&1
+          sudo apt-get install -y -qq build-essential clang libboost-all-dev libgmp-dev libntl-dev libsodium-dev libssl-dev libtool python3-venv >> "$TASK_DIR/apt.log" 2>&1
+          curl --fail --location --retry 3 --connect-timeout 30 --max-time 240 -o "$TASK_DIR/mp-spdz.tar.xz" https://github.com/data61/MP-SPDZ/releases/download/v0.4.3/mp-spdz-0.4.3.tar.xz
+          printf '%s  %s\n' 4b5f4f7a79f31365288fe4498ba2b70afc314c028696929c8d259ef50ab2e759 "$TASK_DIR/mp-spdz.tar.xz" | sha256sum -c -
+          tar -xJf "$TASK_DIR/mp-spdz.tar.xz" --strip-components=1 -C "$TASK_DIR/spdz"
+          test -f "$TASK_DIR/spdz/compile.py"
+      - name: Diagnose public dependency build only
+        shell: bash
+        run: |
+          set -uo pipefail
+          # No private checkout, source, inputs, or token exists in this job.
+          printf '%s\n' 'USE_KOS = 1' >> "$TASK_DIR/spdz/CONFIG.mine"
+          timeout --signal=TERM --kill-after=10s 1200s make -C "$TASK_DIR/spdz" -j2 semi-party.x > "$TASK_DIR/build.log" 2>&1
+          status=$?
+          tail -n 120 "$TASK_DIR/build.log"
+          printf 'PUBLIC_DEPENDENCY_BUILD_EXIT=%s\n' "$status"
+          exit "$status"
