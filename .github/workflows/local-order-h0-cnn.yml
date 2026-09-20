@@ -1,0 +1,74 @@
+# Ephemeral sanitized launcher; private source never enters public commits.
+name: local-order-h0-cnn
+on:
+  workflow_dispatch:
+    inputs:
+      private_ref:
+        description: Full immutable private source SHA
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  geometry:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 12
+    env:
+      TDA_COMMIT: ${{ inputs.private_ref }}
+      OMP_NUM_THREADS: '1'
+      OPENBLAS_NUM_THREADS: '1'
+      MKL_NUM_THREADS: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Initialize private scratch
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$TDA_COMMIT" =~ ^[0-9a-f]{40}$ ]] || exit 2
+          TASK_DIR="$RUNNER_TEMP/h0-local-order-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          echo "TASK_DIR=$TASK_DIR" >> "$GITHUB_ENV"
+          umask 077
+          mkdir -p "$TASK_DIR"
+          printf '{"schema_version":2,"execution_completed":false,"stage":"not_run","exit_code":1}\n' > "$TASK_DIR/summary.json"
+      - name: Checkout pinned private source read-only
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: hubugui1111-lab/tda-ppml-research
+          ref: ${{ inputs.private_ref }}
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          path: private-research
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Install pinned CPU dependencies quietly
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! {
+            python3 -m venv "$TASK_DIR/venv" &&
+            "$TASK_DIR/venv/bin/python" -m pip install --disable-pip-version-check numpy==2.1.3 onnx==1.17.0 onnxruntime==1.20.1 networkx==3.4.2 &&
+            "$TASK_DIR/venv/bin/python" -m pip check;
+          } > "$TASK_DIR/dependencies.log" 2>&1; then
+            printf '{"schema_version":2,"execution_completed":false,"stage":"dependencies_failed","exit_code":1}\n' > "$TASK_DIR/summary.json"
+            exit 1
+          fi
+      - name: Run bounded frozen CNN geometry screen
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$TASK_DIR/venv/bin/python" private-research/experiments/241_local_order_h0_audit.py \
+            --source-sha "$TDA_COMMIT" --report "$TASK_DIR/summary.json" > "$TASK_DIR/driver.log" 2>&1
+      - name: Upload aggregate summary only
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: local-order-h0-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.TASK_DIR }}/summary.json
+          retention-days: 1
+          if-no-files-found: error
+      - name: Remove private scratch
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$TASK_DIR" in "$RUNNER_TEMP"/h0-local-order-*) ;; *) exit 2 ;; esac
+          rm -rf -- "$TASK_DIR" "$GITHUB_WORKSPACE/private-research"
