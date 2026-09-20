@@ -7,11 +7,19 @@ on:
         description: Full immutable private source SHA
         required: true
         type: string
+      runner_image:
+        description: Standard image for paired environment checks
+        required: true
+        type: choice
+        default: ubuntu-24.04
+        options:
+          - ubuntu-24.04
+          - ubuntu-22.04
 permissions:
   contents: read
 jobs:
   selection:
-    runs-on: ubuntu-24.04
+    runs-on: ${{ inputs.runner_image == 'ubuntu-22.04' && 'ubuntu-22.04' || 'ubuntu-24.04' }}
     timeout-minutes: 10
     env:
       TDA_COMMIT: ${{ inputs.private_ref }}
