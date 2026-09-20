@@ -1,0 +1,81 @@
+# Ephemeral sanitized launcher; implementation remains private.
+name: network-structure-cover
+on:
+  workflow_dispatch:
+    inputs:
+      private_ref:
+        description: Full immutable private source SHA
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  geometry:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 12
+    env:
+      TDA_COMMIT: ${{ inputs.private_ref }}
+      OMP_NUM_THREADS: '1'
+      MKL_NUM_THREADS: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Initialize bounded scratch job
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$TDA_COMMIT" =~ ^[0-9a-f]{40}$ ]] || exit 2
+          TASK_DIR="$RUNNER_TEMP/network-structure-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          echo "TASK_DIR=$TASK_DIR" >> "$GITHUB_ENV"
+          echo "PIP_CACHE_DIR=$TASK_DIR/pip-cache" >> "$GITHUB_ENV"
+          umask 077
+          mkdir -p "$TASK_DIR"
+          printf '{"schema_version":1,"pass":false,"stage":"not_run"}\n' > "$TASK_DIR/summary.json"
+      - name: Checkout immutable private source read-only
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: hubugui1111-lab/tda-ppml-research
+          ref: ${{ inputs.private_ref }}
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          path: private-research
+          persist-credentials: false
+          fetch-depth: 1
+          submodules: false
+      - name: Install pinned CPU dependencies quietly
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C private-research rev-parse HEAD)" = "$TDA_COMMIT"
+          if ! {
+            python3 -m venv "$TASK_DIR/venv" &&
+            "$TASK_DIR/venv/bin/python" -m pip install --disable-pip-version-check \
+              torch==2.8.0+cpu --index-url https://download.pytorch.org/whl/cpu &&
+            "$TASK_DIR/venv/bin/python" -m pip install --disable-pip-version-check \
+              numpy==2.1.3 transformers==4.56.2 tokenizers==0.22.0 \
+              huggingface-hub==0.34.4 safetensors==0.6.2 &&
+            "$TASK_DIR/venv/bin/python" -m pip check;
+          } > "$TASK_DIR/dependencies.log" 2>&1; then
+            printf '{"schema_version":1,"pass":false,"stage":"dependencies_failed"}\n' > "$TASK_DIR/summary.json"
+            exit 1
+          fi
+      - name: Check structural regions
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$TASK_DIR/venv/bin/python" private-research/scripts/run_network_structure_cover.py \
+            --source-sha "$TDA_COMMIT" --report "$TASK_DIR/summary.json" --relu-joint \
+            > "$TASK_DIR/driver.log" 2>&1
+      - name: Upload allowlisted aggregate summary
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: network-structure-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.TASK_DIR }}/summary.json
+          retention-days: 1
+          if-no-files-found: error
+      - name: Remove private scratch data
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$TASK_DIR" in "$RUNNER_TEMP"/network-structure-*) ;; *) exit 2 ;; esac
+          rm -rf -- "$TASK_DIR" "$GITHUB_WORKSPACE/private-research"
