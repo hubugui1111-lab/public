@@ -1,0 +1,111 @@
+# Ephemeral sanitized launcher; no private implementation is copied here.
+name: shared-h0-geometry
+on:
+  workflow_dispatch:
+    inputs:
+      private_ref:
+        description: Full immutable private source SHA
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  integration:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 12
+    env:
+      TDA_COMMIT: ${{ inputs.private_ref }}
+      HF_HUB_DISABLE_TELEMETRY: '1'
+      TOKENIZERS_PARALLELISM: 'false'
+      OMP_NUM_THREADS: '1'
+      MKL_NUM_THREADS: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Initialize bounded scratch job
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$TDA_COMMIT" =~ ^[0-9a-f]{40}$ ]] || exit 2
+          TASK_DIR="$RUNNER_TEMP/shared-h0-geometry-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          echo "TASK_DIR=$TASK_DIR" >> "$GITHUB_ENV"
+          echo "HF_HOME=$TASK_DIR/huggingface" >> "$GITHUB_ENV"
+          echo "PIP_CACHE_DIR=$TASK_DIR/pip-cache" >> "$GITHUB_ENV"
+          umask 077
+          mkdir -p "$TASK_DIR"
+          printf '{"schema_version":1,"pass":false,"stage":"not_run"}\n' > "$TASK_DIR/summary.json"
+      - name: Checkout private source read-only
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: hubugui1111-lab/tda-ppml-research
+          ref: ${{ inputs.private_ref }}
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          path: private-research
+          fetch-depth: 1
+          persist-credentials: false
+          submodules: false
+      - name: Install pinned dependencies quietly
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C private-research rev-parse HEAD)" = "$TDA_COMMIT"
+          if ! {
+            sudo apt-get update -qq &&
+            sudo apt-get install -y -qq clang cmake libeigen3-dev libgmp-dev libssl-dev libomp-dev python3-venv &&
+            python3 -m venv "$TASK_DIR/venv" &&
+            "$TASK_DIR/venv/bin/python" -m pip install --disable-pip-version-check \
+              torch==2.8.0+cpu --index-url https://download.pytorch.org/whl/cpu &&
+            "$TASK_DIR/venv/bin/python" -m pip install --disable-pip-version-check \
+              numpy==2.1.3 transformers==4.56.2 tokenizers==0.22.0 \
+              huggingface-hub==0.34.4 safetensors==0.6.2 sentencepiece==0.2.1 &&
+            "$TASK_DIR/venv/bin/python" -m pip check;
+          } > "$TASK_DIR/dependencies.log" 2>&1; then
+            printf '{"schema_version":1,"pass":false,"stage":"dependencies_failed"}\n' > "$TASK_DIR/summary.json"
+            exit 1
+          fi
+      - name: Fetch pinned public dependency quietly
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! {
+            git clone --depth 1 https://github.com/cmu-cryptosystems/BOLT.git "$TASK_DIR/BOLT" &&
+            git -C "$TASK_DIR/BOLT" fetch --depth 1 origin 6911b1c26cb0405793e7b5a3e9effe67f659bc49 &&
+            git -C "$TASK_DIR/BOLT" checkout --detach 6911b1c26cb0405793e7b5a3e9effe67f659bc49 &&
+            test "$(git -C "$TASK_DIR/BOLT" rev-parse HEAD)" = 6911b1c26cb0405793e7b5a3e9effe67f659bc49;
+          } > "$TASK_DIR/fetch.log" 2>&1; then
+            printf '{"schema_version":1,"pass":false,"stage":"fetch_failed"}\n' > "$TASK_DIR/summary.json"
+            exit 1
+          fi
+      - name: Build shared verified components
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! {
+            cmake -S private-research/experiments/235_shared_h0_geometry -B "$TASK_DIR/build" \
+              -DBOLT_ROOT="$TASK_DIR/BOLT" -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=clang++ &&
+            cmake --build "$TASK_DIR/build" --parallel 2 --target h0_ball_certificate h0_ot_packing_regression h0_batched_cot_buffer_regression h0_transport_regression;
+          } > "$TASK_DIR/build.log" 2>&1; then
+            python3 private-research/scripts/summarize_h0_build_failure.py "$TASK_DIR/build.log" "$TASK_DIR/summary.json"
+            exit 1
+          fi
+      - name: Validate shared-reference geometry and two-party certificate
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$TASK_DIR/venv/bin/python" private-research/scripts/run_shared_h0_geometry.py \
+            --build "$TASK_DIR/build" --source-sha "$TDA_COMMIT" --report "$TASK_DIR/summary.json" \
+            > "$TASK_DIR/driver.log" 2>&1
+      - name: Upload allowlisted scratch summary
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: shared-h0-geometry-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.TASK_DIR }}/summary.json
+          if-no-files-found: error
+          retention-days: 1
+      - name: Remove private scratch data
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$TASK_DIR" in "$RUNNER_TEMP"/shared-h0-geometry-*) ;; *) exit 2 ;; esac
+          rm -rf -- "$TASK_DIR" "$GITHUB_WORKSPACE/private-research"
