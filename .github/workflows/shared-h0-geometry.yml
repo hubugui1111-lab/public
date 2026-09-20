@@ -7,6 +7,11 @@ on:
         description: Full immutable private source SHA
         required: true
         type: string
+      geometry_only:
+        description: Geometry diagnosis without repeating unchanged crypto tests
+        required: false
+        default: false
+        type: boolean
 permissions:
   contents: read
 jobs:
@@ -15,6 +20,7 @@ jobs:
     timeout-minutes: 12
     env:
       TDA_COMMIT: ${{ inputs.private_ref }}
+      GEOMETRY_ONLY: ${{ inputs.geometry_only }}
       HF_HUB_DISABLE_TELEMETRY: '1'
       TOKENIZERS_PARALLELISM: 'false'
       OMP_NUM_THREADS: '1'
@@ -63,6 +69,7 @@ jobs:
             exit 1
           fi
       - name: Fetch pinned public dependency quietly
+        if: ${{ !inputs.geometry_only }}
         shell: bash
         run: |
           set -euo pipefail
@@ -76,6 +83,7 @@ jobs:
             exit 1
           fi
       - name: Build shared verified components
+        if: ${{ !inputs.geometry_only }}
         shell: bash
         run: |
           set -euo pipefail
@@ -91,8 +99,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          EXTRA=()
+          if [[ "$GEOMETRY_ONLY" == 'true' ]]; then EXTRA+=(--geometry-only); fi
           "$TASK_DIR/venv/bin/python" private-research/scripts/run_shared_h0_geometry.py \
             --build "$TASK_DIR/build" --source-sha "$TDA_COMMIT" --report "$TASK_DIR/summary.json" \
+            "${EXTRA[@]}" \
             > "$TASK_DIR/driver.log" 2>&1
       - name: Upload allowlisted scratch summary
         if: always()
