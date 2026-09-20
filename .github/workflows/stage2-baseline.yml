@@ -7,6 +7,11 @@ on:
         description: Full immutable private source SHA
         required: true
         type: string
+      diagnose:
+        description: Bounded liveness diagnosis only
+        required: false
+        default: false
+        type: boolean
 permissions:
   contents: read
 jobs:
@@ -15,6 +20,7 @@ jobs:
     timeout-minutes: 25
     env:
       TDA_COMMIT: ${{ inputs.private_ref }}
+      DIAGNOSE: ${{ inputs.diagnose }}
     steps:
       - name: Initialize bounded scratch job
         shell: bash
@@ -77,8 +83,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          EXTRA=()
+          if [ "$DIAGNOSE" = true ]; then EXTRA+=(--diagnose); fi
           python3 private-research/scripts/run_stage2_bolt_baseline.py --build "$TASK_DIR/build" \
-            --source-sha "$TDA_COMMIT" --report "$TASK_DIR/summary.json" > "$TASK_DIR/driver.log" 2>&1
+            --source-sha "$TDA_COMMIT" --report "$TASK_DIR/summary.json" "${EXTRA[@]}" > "$TASK_DIR/driver.log" 2>&1
       - name: Upload allowlisted scratch summary
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
