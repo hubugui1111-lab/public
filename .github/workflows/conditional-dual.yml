@@ -1,0 +1,64 @@
+# Ephemeral sanitized launcher; implementation remains private.
+name: conditional-dual-checks
+on:
+  workflow_dispatch:
+    inputs:
+      private_ref:
+        description: Full immutable private source SHA
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  geometry:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 3
+    env:
+      TDA_COMMIT: ${{ inputs.private_ref }}
+      OMP_NUM_THREADS: '1'
+      MKL_NUM_THREADS: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Initialize bounded scratch job
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$TDA_COMMIT" =~ ^[0-9a-f]{40}$ ]] || exit 2
+          TASK_DIR="$RUNNER_TEMP/network-structure-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          echo "TASK_DIR=$TASK_DIR" >> "$GITHUB_ENV"
+          echo "PIP_CACHE_DIR=$TASK_DIR/pip-cache" >> "$GITHUB_ENV"
+          umask 077
+          mkdir -p "$TASK_DIR"
+          printf '{"schema_version":1,"pass":false,"stage":"not_run"}\n' > "$TASK_DIR/summary.json"
+      - name: Checkout immutable private source read-only
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: hubugui1111-lab/tda-ppml-research
+          ref: ${{ inputs.private_ref }}
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          path: private-research
+          persist-credentials: false
+          fetch-depth: 1
+          submodules: false
+      - name: Check exact rational module quietly
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 private-research/scripts/run_conditional_dual_checks.py \
+            --source-sha "$TDA_COMMIT" --report "$TASK_DIR/summary.json" \
+            > "$TASK_DIR/driver.log" 2>&1
+      - name: Upload allowlisted aggregate summary
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: network-structure-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.TASK_DIR }}/summary.json
+          retention-days: 1
+          if-no-files-found: error
+      - name: Remove private scratch data
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$TASK_DIR" in "$RUNNER_TEMP"/network-structure-*) ;; *) exit 2 ;; esac
+          rm -rf -- "$TASK_DIR" "$GITHUB_WORKSPACE/private-research"
