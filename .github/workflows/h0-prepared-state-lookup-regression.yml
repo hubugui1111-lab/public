@@ -49,7 +49,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_CXX_COMPILER=clang++
           cmake --build "$RUNNER_TEMP/build" \
-            --target prepared_state_lookup_regression state_key_final_output_regression prepared_state_column_select_regression a2b_remask_bridge_regression a2b_remask_bridge_wide_regression state_key_bit_bridge_regression state_key_bit_bridge_scale \
+            --target prepared_state_lookup_regression state_key_final_output_regression prepared_state_column_select_regression a2b_remask_bridge_regression a2b_remask_bridge_wide_regression state_key_bit_bridge_regression state_key_bit_bridge_scale state_key_full_private_chain_regression \
             --parallel 2
 
       - name: Run real two-party prepared state lookup
@@ -156,3 +156,20 @@ jobs:
           grep -q "mismatches=0" "$RUNNER_TEMP/bob-scale.log"
           cat "$RUNNER_TEMP/alice-scale.log"
           cat "$RUNNER_TEMP/bob-scale.log"
+
+      - name: Run real state-key M3-M6 integration chain
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN="$RUNNER_TEMP/build/state_key_full_private_chain_regression"
+          PORT=39121
+          "$BIN" 1 "$PORT" > "$RUNNER_TEMP/alice-full-chain.log" 2>&1 &
+          APID=$!
+          sleep 1
+          "$BIN" 2 "$PORT" > "$RUNNER_TEMP/bob-full-chain.log" 2>&1
+          wait "$APID"
+          grep -q "PASS state_key_full_private_chain" "$RUNNER_TEMP/alice-full-chain.log"
+          grep -q "PASS state_key_full_private_chain" "$RUNNER_TEMP/bob-full-chain.log"
+          grep -q "mismatches=0" "$RUNNER_TEMP/bob-full-chain.log"
+          cat "$RUNNER_TEMP/alice-full-chain.log"
+          cat "$RUNNER_TEMP/bob-full-chain.log"
