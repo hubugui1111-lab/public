@@ -37,7 +37,7 @@ jobs:
             torch==2.8.0+cpu --index-url https://download.pytorch.org/whl/cpu
           "$RUNNER_TEMP/venv/bin/python" -m pip install --disable-pip-version-check \
             numpy==2.1.3 scipy==1.14.1 transformers==4.56.2 \
-            huggingface-hub==0.34.4 safetensors==0.6.2 python-flint==0.8.0
+            huggingface-hub==0.34.4 safetensors==0.6.2 python-flint==0.9.0
       - name: Build exact 308-hyperplane certificate
         run: |
           set -euo pipefail
