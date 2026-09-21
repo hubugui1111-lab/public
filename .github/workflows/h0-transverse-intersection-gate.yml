@@ -1,0 +1,39 @@
+name: h0-transverse-intersection-gate
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/h0-transverse-intersection-gate.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout private research repo READ ONLY
+        uses: actions/checkout@v4
+        with:
+          repository: hubugui1111-lab/tda-ppml-research
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          path: private-research
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Verify exact certificate algebra
+        run: |
+          set -euo pipefail
+          cd private-research
+          python -m unittest discover -s tests -p 'test_h0_transverse_intersection.py' -v
+      - name: Install LP search binding
+        run: python -m pip install --disable-pip-version-check scipy
+      - name: Search exact interior common zero
+        run: |
+          set -euo pipefail
+          cd private-research
+          python -m tools.local_transverse_intersection_gate \
+            --out "$RUNNER_TEMP/transverse.json"
