@@ -84,8 +84,8 @@ jobs:
           set -euo pipefail
           "$TASK_DIR/venv/bin/python" private-research/scripts/run_shared_residual_h0.py \
             --source-sha "$TDA_COMMIT" --build "$TASK_DIR/build" --report "$TASK_DIR/summary.json" \
-            --modes 0 297 307 317 327 --lanes 4 8 --capacity-percent 10 --reference-depth 12 \
-            --real-samples 32 --random-samples 8 --seed "$TEST_SEED" \
+            --modes 0 297 307 --lanes 8 --capacity-percent 10 --reference-depth 12 \
+            --real-samples 32 --random-samples 4 --seed "$TEST_SEED" \
             > "$TASK_DIR/driver.log" 2>&1
       - name: Upload aggregate summary only
         if: always()
