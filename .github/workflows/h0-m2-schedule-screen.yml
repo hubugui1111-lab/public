@@ -34,7 +34,7 @@ jobs:
           set -euo pipefail
           cd private-research
           python -m tools.local_schedule_gate \
-            --cap 262144 \
+            --cap 65536 \
             --out "$RUNNER_TEMP/schedule_report.json"
           python - <<'PY'
           import json, os
