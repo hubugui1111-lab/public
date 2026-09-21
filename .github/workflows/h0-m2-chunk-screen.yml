@@ -13,7 +13,7 @@ permissions:
 jobs:
   screen:
     runs-on: ubuntu-22.04
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - name: Checkout private research repo READ ONLY
@@ -29,8 +29,19 @@ jobs:
           set -euo pipefail
           cd private-research
           python -m unittest discover -s tests -p 'test_h0_chunked_profile.py' -v
-      - name: Quick real-weight chunk screen
+      - name: Targeted real-weight chunk screen
         run: |
           set -euo pipefail
           cd private-research
-          python -m tools.local_chunked_m2_gate --cap 65536 --out "$RUNNER_TEMP/chunk.json"
+          python - <<'PY'
+          from tools.h0_m2_preprocess.model import ModelSpec
+          from tools.h0_m2_preprocess.chunked_profile import profile_chunked
+          from tools.h0_m2_preprocess.schedules import axis_major_msb
+          model=ModelSpec.load("results/local_real_model/exact_patch_model.json")
+          sched=axis_major_msb(model.domain)
+          for k in (1,2,4):
+              r=profile_chunked(model,sched,chunk_bits=k,max_states=16384)
+              print("TARGET_CHUNK",k,r["status"],round(r["elapsed_seconds"],6),
+                    r["states"],r["build_calls"],r["memo_hits"],
+                    r["max_partial_width"],r["deepest_bit_depth"],flush=True)
+          PY
