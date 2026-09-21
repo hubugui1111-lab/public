@@ -1,4 +1,4 @@
-name: h0-opt-prefix-overlap-audit
+name: h0-opt-prefix-overlap-audit # tokenizer-only rerun
 
 on:
   push:
