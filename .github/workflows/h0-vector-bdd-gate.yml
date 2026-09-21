@@ -1,4 +1,4 @@
-name: h0-vector-bdd-gate
+name: h0-vector-bdd-gate # rerun fixed regression
 
 on:
   push:
