@@ -1,4 +1,4 @@
-# rerun after reachable-state lift fix
+# rerun with functional M1-M6 closure
 name: h0-state-key-fsm-regression
 
 on:
@@ -39,3 +39,4 @@ jobs:
           python -m unittest tests.test_h0_m2_preprocess -v
           python -m unittest tests.test_h0_private_chain -v
           python -m unittest tests.test_h0_state_key_fsm -v
+          python -m unittest tests.test_h0_m1_m6_e2e -v
