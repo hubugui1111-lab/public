@@ -1,4 +1,4 @@
-# temporary scratch workflow: serialized M2 artifact -> real M3-M6
+# temporary scratch workflow: serialized M2 artifact -> prepared real M3-M6
 name: h0-prepared-state-lookup-regression
 
 on:
