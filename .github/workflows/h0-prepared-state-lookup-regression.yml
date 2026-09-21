@@ -105,3 +105,21 @@ jobs:
           grep -q "mismatches=0" "$RUNNER_TEMP/bob-scale.log"
           cat "$RUNNER_TEMP/alice-scale.log"
           cat "$RUNNER_TEMP/bob-scale.log"
+
+
+      - name: Benchmark prepared parallel-prefix 768x16 bridge
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN="$RUNNER_TEMP/build/state_key_bit_bridge_prepared_scale"
+          PORT=39151
+          "$BIN" 1 "$PORT" > "$RUNNER_TEMP/alice-prepared-scale.log" 2>&1 &
+          APID=$!
+          sleep 1
+          "$BIN" 2 "$PORT" > "$RUNNER_TEMP/bob-prepared-scale.log" 2>&1
+          wait "$APID"
+          grep -q "PASS state_key_bit_bridge_prepared_scale" "$RUNNER_TEMP/alice-prepared-scale.log"
+          grep -q "schedule_bits=12288" "$RUNNER_TEMP/bob-prepared-scale.log"
+          grep -q "mismatches=0" "$RUNNER_TEMP/bob-prepared-scale.log"
+          cat "$RUNNER_TEMP/alice-prepared-scale.log"
+          cat "$RUNNER_TEMP/bob-prepared-scale.log"
