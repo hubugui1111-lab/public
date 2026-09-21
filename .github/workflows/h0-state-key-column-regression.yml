@@ -1,0 +1,66 @@
+name: h0-state-key-column-regression
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/h0-state-key-column-regression.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  column:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout private research repo READ ONLY
+        uses: actions/checkout@v4
+        with:
+          repository: hubugui1111-lab/tda-ppml-research
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          path: private-research
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Install build dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq clang cmake libeigen3-dev libgmp-dev libssl-dev libomp-dev
+
+      - name: Fetch pinned BOLT dependency
+        run: |
+          set -euo pipefail
+          git clone --depth 1 https://github.com/cmu-cryptosystems/BOLT.git "$RUNNER_TEMP/BOLT"
+          git -C "$RUNNER_TEMP/BOLT" fetch --depth 1 origin 6911b1c26cb0405793e7b5a3e9effe67f659bc49
+          git -C "$RUNNER_TEMP/BOLT" checkout --detach 6911b1c26cb0405793e7b5a3e9effe67f659bc49
+
+      - name: Build prepared state-key column regression
+        run: |
+          set -euo pipefail
+          cmake -S private-research/experiments/243_factored_private_lookup \
+            -B "$RUNNER_TEMP/build" \
+            -DBOLT_ROOT="$RUNNER_TEMP/BOLT" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_COMPILER=clang++
+          cmake --build "$RUNNER_TEMP/build" --target prepared_state_column_select_regression --parallel 2
+
+      - name: Run real two-party parallel column selection
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN="$RUNNER_TEMP/build/prepared_state_column_select_regression"
+          PORT=39061
+          "$BIN" 1 "$PORT" > "$RUNNER_TEMP/alice.log" 2>&1 &
+          APID=$!
+          sleep 1
+          "$BIN" 2 "$PORT" > "$RUNNER_TEMP/bob.log" 2>&1
+          wait "$APID"
+          grep -q "PASS prepared_state_column_select" "$RUNNER_TEMP/alice.log"
+          grep -q "PASS prepared_state_column_select" "$RUNNER_TEMP/bob.log"
+          cat "$RUNNER_TEMP/alice.log"
+          cat "$RUNNER_TEMP/bob.log"
