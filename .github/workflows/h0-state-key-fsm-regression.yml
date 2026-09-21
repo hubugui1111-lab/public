@@ -1,3 +1,4 @@
+# rerun after reachable-state lift fix
 name: h0-state-key-fsm-regression
 
 on:
