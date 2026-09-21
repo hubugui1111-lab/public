@@ -47,6 +47,8 @@ jobs:
           except CompileLimitExceeded:
               pass
           widths=Counter(s.depth for s in compiler.states)
+          for cutoff in (192,196):
+              print("PREFIX_COUNT",cutoff,sum(v for d,v in widths.items() if d < cutoff),flush=True)
           for k in (4,8):
               d=len(sched)-k
               print("TAIL_WIDTH",k,d,widths[d],flush=True)
