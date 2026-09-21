@@ -39,7 +39,7 @@ jobs:
           git -C "$RUNNER_TEMP/BOLT" fetch --depth 1 origin 6911b1c26cb0405793e7b5a3e9effe67f659bc49
           git -C "$RUNNER_TEMP/BOLT" checkout --detach 6911b1c26cb0405793e7b5a3e9effe67f659bc49
 
-      - name: Build private lookup and M5-M6 regressions
+      - name: Build private M3-M6 regressions
         run: |
           set -euo pipefail
           cmake -S private-research/experiments/243_factored_private_lookup \
@@ -48,7 +48,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_CXX_COMPILER=clang++
           cmake --build "$RUNNER_TEMP/build" \
-            --target prepared_state_lookup_regression state_key_final_output_regression \
+            --target prepared_state_lookup_regression state_key_final_output_regression prepared_state_column_select_regression \
             --parallel 2
 
       - name: Run real two-party prepared state lookup
@@ -56,7 +56,6 @@ jobs:
         run: |
           set -euo pipefail
           BIN="$RUNNER_TEMP/build/prepared_state_lookup_regression"
-          test -x "$BIN"
           PORT=39051
           "$BIN" 1 "$PORT" > "$RUNNER_TEMP/alice-lookup.log" 2>&1 &
           APID=$!
@@ -65,15 +64,12 @@ jobs:
           wait "$APID"
           grep -q "PASS prepared_state_lookup" "$RUNNER_TEMP/alice-lookup.log"
           grep -q "PASS prepared_state_lookup" "$RUNNER_TEMP/bob-lookup.log"
-          cat "$RUNNER_TEMP/alice-lookup.log"
-          cat "$RUNNER_TEMP/bob-lookup.log"
 
       - name: Run real two-party final M5 lookup into native M6
         shell: bash
         run: |
           set -euo pipefail
           BIN="$RUNNER_TEMP/build/state_key_final_output_regression"
-          test -x "$BIN"
           PORT=39061
           "$BIN" 1 "$PORT" > "$RUNNER_TEMP/alice-m6.log" 2>&1 &
           APID=$!
@@ -85,3 +81,19 @@ jobs:
           grep -q "mismatches=0" "$RUNNER_TEMP/bob-m6.log"
           cat "$RUNNER_TEMP/alice-m6.log"
           cat "$RUNNER_TEMP/bob-m6.log"
+
+      - name: Run real two-party parallel state-key column OT
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN="$RUNNER_TEMP/build/prepared_state_column_select_regression"
+          PORT=39071
+          "$BIN" 1 "$PORT" > "$RUNNER_TEMP/alice-columns.log" 2>&1 &
+          APID=$!
+          sleep 1
+          "$BIN" 2 "$PORT" > "$RUNNER_TEMP/bob-columns.log" 2>&1
+          wait "$APID"
+          grep -q "PASS prepared_state_column_select" "$RUNNER_TEMP/alice-columns.log"
+          grep -q "PASS prepared_state_column_select" "$RUNNER_TEMP/bob-columns.log"
+          cat "$RUNNER_TEMP/alice-columns.log"
+          cat "$RUNNER_TEMP/bob-columns.log"
