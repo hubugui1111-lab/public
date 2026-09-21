@@ -1,4 +1,4 @@
-name: h0-opt-pair-cigar
+name: h0-opt-pair-cigar # conservative-threshold rerun
 
 on:
   push:
