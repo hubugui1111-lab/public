@@ -1,0 +1,36 @@
+name: h0-m2-chunk-screen
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/h0-m2-chunk-screen.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  screen:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout private research repo READ ONLY
+        uses: actions/checkout@v4
+        with:
+          repository: hubugui1111-lab/tda-ppml-research
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          path: private-research
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Verify chunk semantics
+        run: |
+          set -euo pipefail
+          cd private-research
+          python -m unittest discover -s tests -p 'test_h0_chunked_profile.py' -v
+      - name: Quick real-weight chunk screen
+        run: |
+          set -euo pipefail
+          cd private-research
+          python -m tools.local_chunked_m2_gate --cap 65536 --out "$RUNNER_TEMP/chunk.json"
