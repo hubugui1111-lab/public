@@ -50,7 +50,13 @@ jobs:
           program=M2Compiler(model).compile()
           artifact=build_serialized_fsm(program,public_width=64)
           digest=artifact.save("/tmp/h0-state-key-plan.bin")
-          print("SERIALIZED_FSM",artifact.d,artifact.m,artifact.depth,artifact.width,artifact.artifact_bytes,digest)
+          offsets=[(j*37+5)&((1<<model.domain.bits[j])-1) for j in range(model.d)]
+          point=tuple(model.domain.lo[j]+offsets[j] for j in range(model.d))
+          z=[model.affine(i,point) for i in range(model.m)]
+          assert all(-32768 <= v <= 32767 for v in z)
+          assert all(v != 0 for v in z)
+          open("/tmp/h0-affine-z.txt","w").write("\n".join(map(str,z))+"\n")
+          print("SERIALIZED_FSM",artifact.d,artifact.m,artifact.depth,artifact.width,artifact.artifact_bytes,digest,"POINT",point,"Z",z)
           PY
 
       - name: Fetch pinned BOLT dependency
@@ -78,13 +84,14 @@ jobs:
           set -euo pipefail
           BIN="$RUNNER_TEMP/build/state_key_serialized_plan_regression"
           PORT=39131
-          "$BIN" 1 "$PORT" /tmp/h0-state-key-plan.bin > "$RUNNER_TEMP/alice-serialized.log" 2>&1 &
+          "$BIN" 1 "$PORT" /tmp/h0-state-key-plan.bin /tmp/h0-affine-z.txt > "$RUNNER_TEMP/alice-serialized.log" 2>&1 &
           APID=$!
           sleep 1
-          "$BIN" 2 "$PORT" - > "$RUNNER_TEMP/bob-serialized.log" 2>&1
+          "$BIN" 2 "$PORT" - - > "$RUNNER_TEMP/bob-serialized.log" 2>&1
           wait "$APID"
           grep -q "PASS state_key_serialized_plan" "$RUNNER_TEMP/alice-serialized.log"
           grep -q "PASS state_key_serialized_plan" "$RUNNER_TEMP/bob-serialized.log"
+          grep -q "affine_linked=true" "$RUNNER_TEMP/bob-serialized.log"
           grep -q "mismatches=0" "$RUNNER_TEMP/bob-serialized.log"
           cat "$RUNNER_TEMP/alice-serialized.log"
           cat "$RUNNER_TEMP/bob-serialized.log"
