@@ -1,0 +1,40 @@
+name: h0-state-key-fsm-regression
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/h0-state-key-fsm-regression.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout private research repo READ ONLY
+        uses: actions/checkout@v4
+        with:
+          repository: hubugui1111-lab/tda-ppml-research
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          path: private-research
+          fetch-depth: 1
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run M2/private-chain/state-key regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd private-research
+          python -m unittest tests.test_h0_m2_preprocess -v
+          python -m unittest tests.test_h0_private_chain -v
+          python -m unittest tests.test_h0_state_key_fsm -v
