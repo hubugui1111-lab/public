@@ -1,0 +1,55 @@
+name: h0-interval-scale
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/h0-interval-scale.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  screen:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout private research repo READ ONLY
+        uses: actions/checkout@v4
+        with:
+          repository: hubugui1111-lab/tda-ppml-research
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          path: private-research
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Compile scalar exact interval BDDs at 1M cap
+        run: |
+          set -euo pipefail
+          cd private-research
+          python - <<'PY'
+          import time
+          from tools.h0_m2_preprocess.model import ModelSpec, CompileLimitExceeded
+          from tools.h0_m2_preprocess.interval_bdd import IntervalBDD
+          from tools.h0_m2_preprocess.schedules import bit_plane_msb, axis_major_msb
+          model=ModelSpec.load("results/local_real_model/exact_patch_model.json")
+          for name,sched in (
+              ("bit_plane",bit_plane_msb(model.domain)),
+              ("axis_major",axis_major_msb(model.domain)),
+          ):
+              for i in range(model.m):
+                  coeff=tuple(model.coefficients[i][axis]*(1<<bit) for axis,bit in sched)
+                  bias=model.bias[i]+sum(a*x for a,x in zip(model.coefficients[i],model.domain.lo))
+                  t=time.perf_counter()
+                  bdd=IntervalBDD(coeff,bias,max_states=1048576)
+                  status="COMPILED"
+                  try:
+                      bdd.build()
+                  except CompileLimitExceeded:
+                      status="BUDGET_EXCEEDED"
+                  dt=time.perf_counter()-t
+                  print("INTERVAL_SCALE",name,i,status,round(dt,6),
+                        len(bdd.nodes)-3,bdd.calls,bdd.hits,bdd.entries,bdd.reductions,
+                        flush=True)
+          PY
