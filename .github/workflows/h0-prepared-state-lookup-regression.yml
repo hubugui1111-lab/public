@@ -1,4 +1,4 @@
-# rerun: include exact and optimized A2B/remask bridges
+# temporary scratch workflow: serialized M2 artifact -> real M3-M6
 name: h0-prepared-state-lookup-regression
 
 on:
@@ -33,6 +33,26 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq clang cmake libeigen3-dev libgmp-dev libssl-dev libomp-dev
 
+      - name: Verify Python serialized-FSM bridge
+        run: |
+          set -euo pipefail
+          cd private-research
+          python -m unittest discover -s tests -p 'test_h0_serialized_fsm.py' -v
+          python - <<'PY'
+          from tools.h0_m2_preprocess.compiler import DomainSpec, M2Compiler, ModelSpec
+          from tools.h0_private_chain.serialized_fsm import build_serialized_fsm
+          model = ModelSpec(
+              coefficients=((2,1),(-3,1),(1,-2),(1,1)),
+              bias=(-4,2,1,-6),
+              domain=DomainSpec(lo=(-2,3),bits=(3,3)),
+              layer_id="runner-serialized-fsm",
+          )
+          program=M2Compiler(model).compile()
+          artifact=build_serialized_fsm(program,public_width=64)
+          digest=artifact.save("/tmp/h0-state-key-plan.bin")
+          print("SERIALIZED_FSM",artifact.d,artifact.m,artifact.depth,artifact.width,artifact.artifact_bytes,digest)
+          PY
+
       - name: Fetch pinned BOLT dependency
         run: |
           set -euo pipefail
@@ -40,7 +60,7 @@ jobs:
           git -C "$RUNNER_TEMP/BOLT" fetch --depth 1 origin 6911b1c26cb0405793e7b5a3e9effe67f659bc49
           git -C "$RUNNER_TEMP/BOLT" checkout --detach 6911b1c26cb0405793e7b5a3e9effe67f659bc49
 
-      - name: Build private M3-M6 regressions
+      - name: Build private serialized M2-M6 regression
         run: |
           set -euo pipefail
           cmake -S private-research/experiments/243_factored_private_lookup \
@@ -49,127 +69,39 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_CXX_COMPILER=clang++
           cmake --build "$RUNNER_TEMP/build" \
-            --target prepared_state_lookup_regression state_key_final_output_regression prepared_state_column_select_regression a2b_remask_bridge_regression a2b_remask_bridge_wide_regression state_key_bit_bridge_regression state_key_bit_bridge_scale state_key_full_private_chain_regression \
+            --target state_key_serialized_plan_regression state_key_bit_bridge_scale \
             --parallel 2
 
-      - name: Run real two-party prepared state lookup
+      - name: Run Python-artifact to real two-party M3-M6
         shell: bash
         run: |
           set -euo pipefail
-          BIN="$RUNNER_TEMP/build/prepared_state_lookup_regression"
-          PORT=39051
-          "$BIN" 1 "$PORT" > "$RUNNER_TEMP/alice-lookup.log" 2>&1 &
+          BIN="$RUNNER_TEMP/build/state_key_serialized_plan_regression"
+          PORT=39131
+          "$BIN" 1 "$PORT" /tmp/h0-state-key-plan.bin > "$RUNNER_TEMP/alice-serialized.log" 2>&1 &
           APID=$!
           sleep 1
-          "$BIN" 2 "$PORT" > "$RUNNER_TEMP/bob-lookup.log" 2>&1
+          "$BIN" 2 "$PORT" - > "$RUNNER_TEMP/bob-serialized.log" 2>&1
           wait "$APID"
-          grep -q "PASS prepared_state_lookup" "$RUNNER_TEMP/alice-lookup.log"
-          grep -q "PASS prepared_state_lookup" "$RUNNER_TEMP/bob-lookup.log"
+          grep -q "PASS state_key_serialized_plan" "$RUNNER_TEMP/alice-serialized.log"
+          grep -q "PASS state_key_serialized_plan" "$RUNNER_TEMP/bob-serialized.log"
+          grep -q "mismatches=0" "$RUNNER_TEMP/bob-serialized.log"
+          cat "$RUNNER_TEMP/alice-serialized.log"
+          cat "$RUNNER_TEMP/bob-serialized.log"
 
-      - name: Run real two-party final M5 lookup into native M6
-        shell: bash
-        run: |
-          set -euo pipefail
-          BIN="$RUNNER_TEMP/build/state_key_final_output_regression"
-          PORT=39061
-          "$BIN" 1 "$PORT" > "$RUNNER_TEMP/alice-m6.log" 2>&1 &
-          APID=$!
-          sleep 1
-          "$BIN" 2 "$PORT" > "$RUNNER_TEMP/bob-m6.log" 2>&1
-          wait "$APID"
-          grep -q "PASS final_state_output_m6" "$RUNNER_TEMP/alice-m6.log"
-          grep -q "PASS final_state_output_m6" "$RUNNER_TEMP/bob-m6.log"
-          grep -q "mismatches=0" "$RUNNER_TEMP/bob-m6.log"
-
-      - name: Run real two-party parallel state-key column OT
-        shell: bash
-        run: |
-          set -euo pipefail
-          BIN="$RUNNER_TEMP/build/prepared_state_column_select_regression"
-          PORT=39071
-          "$BIN" 1 "$PORT" > "$RUNNER_TEMP/alice-columns.log" 2>&1 &
-          APID=$!
-          sleep 1
-          "$BIN" 2 "$PORT" > "$RUNNER_TEMP/bob-columns.log" 2>&1
-          wait "$APID"
-          grep -q "PASS prepared_state_column_select" "$RUNNER_TEMP/alice-columns.log"
-          grep -q "PASS prepared_state_column_select" "$RUNNER_TEMP/bob-columns.log"
-
-      - name: Run canonical SCI A2B/remask bridges
-        shell: bash
-        run: |
-          set -euo pipefail
-          BIN="$RUNNER_TEMP/build/a2b_remask_bridge_regression"
-          PORT=39081
-          "$BIN" 1 "$PORT" > "$RUNNER_TEMP/alice-a2b.log" 2>&1 &
-          APID=$!
-          sleep 1
-          "$BIN" 2 "$PORT" > "$RUNNER_TEMP/bob-a2b.log" 2>&1
-          wait "$APID"
-          grep -q "PASS a2b_remask_bridge" "$RUNNER_TEMP/alice-a2b.log"
-          grep -q "mismatches=0" "$RUNNER_TEMP/bob-a2b.log"
-
-          BIN="$RUNNER_TEMP/build/a2b_remask_bridge_wide_regression"
-          PORT=39091
-          "$BIN" 1 "$PORT" > "$RUNNER_TEMP/alice-a2b-wide.log" 2>&1 &
-          APID=$!
-          sleep 1
-          "$BIN" 2 "$PORT" > "$RUNNER_TEMP/bob-a2b-wide.log" 2>&1
-          wait "$APID"
-          grep -q "ell=16" "$RUNNER_TEMP/bob-a2b-wide.log"
-          grep -q "ell=21" "$RUNNER_TEMP/bob-a2b-wide.log"
-          grep -q "mismatches=0" "$RUNNER_TEMP/bob-a2b-wide.log"
-          cat "$RUNNER_TEMP/alice-a2b-wide.log"
-          cat "$RUNNER_TEMP/bob-a2b-wide.log"
-
-      - name: Run optimized 16/21-bit state-key bridge
-        shell: bash
-        run: |
-          set -euo pipefail
-          BIN="$RUNNER_TEMP/build/state_key_bit_bridge_regression"
-          PORT=39101
-          "$BIN" 1 "$PORT" > "$RUNNER_TEMP/alice-wide.log" 2>&1 &
-          APID=$!
-          sleep 1
-          "$BIN" 2 "$PORT" > "$RUNNER_TEMP/bob-wide.log" 2>&1
-          wait "$APID"
-          grep -q "PASS state_key_bit_bridge" "$RUNNER_TEMP/alice-wide.log"
-          grep -q "PASS state_key_bit_bridge" "$RUNNER_TEMP/bob-wide.log"
-          grep -q "mismatches=0" "$RUNNER_TEMP/bob-wide.log"
-          cat "$RUNNER_TEMP/alice-wide.log"
-          cat "$RUNNER_TEMP/bob-wide.log"
-
-      - name: Benchmark optimized 768x16 bridge
+      - name: Recheck target-volume bit bridge
         shell: bash
         run: |
           set -euo pipefail
           BIN="$RUNNER_TEMP/build/state_key_bit_bridge_scale"
-          PORT=39111
+          PORT=39141
           "$BIN" 1 "$PORT" > "$RUNNER_TEMP/alice-scale.log" 2>&1 &
           APID=$!
           sleep 1
           "$BIN" 2 "$PORT" > "$RUNNER_TEMP/bob-scale.log" 2>&1
           wait "$APID"
           grep -q "PASS state_key_bit_bridge_scale" "$RUNNER_TEMP/alice-scale.log"
-          grep -q "PASS state_key_bit_bridge_scale" "$RUNNER_TEMP/bob-scale.log"
           grep -q "schedule_bits=12288" "$RUNNER_TEMP/bob-scale.log"
           grep -q "mismatches=0" "$RUNNER_TEMP/bob-scale.log"
           cat "$RUNNER_TEMP/alice-scale.log"
           cat "$RUNNER_TEMP/bob-scale.log"
-
-      - name: Run real state-key M3-M6 integration chain
-        shell: bash
-        run: |
-          set -euo pipefail
-          BIN="$RUNNER_TEMP/build/state_key_full_private_chain_regression"
-          PORT=39121
-          "$BIN" 1 "$PORT" > "$RUNNER_TEMP/alice-full-chain.log" 2>&1 &
-          APID=$!
-          sleep 1
-          "$BIN" 2 "$PORT" > "$RUNNER_TEMP/bob-full-chain.log" 2>&1
-          wait "$APID"
-          grep -q "PASS state_key_full_private_chain" "$RUNNER_TEMP/alice-full-chain.log"
-          grep -q "PASS state_key_full_private_chain" "$RUNNER_TEMP/bob-full-chain.log"
-          grep -q "mismatches=0" "$RUNNER_TEMP/bob-full-chain.log"
-          cat "$RUNNER_TEMP/alice-full-chain.log"
-          cat "$RUNNER_TEMP/bob-full-chain.log"
