@@ -1,0 +1,104 @@
+# Ephemeral launcher; all implementation and party logs stay in private scratch.
+name: margin-certificate-h0
+on:
+  workflow_dispatch:
+    inputs:
+      private_ref:
+        description: Full immutable private source SHA
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  component:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 12
+    env:
+      TDA_COMMIT: ${{ inputs.private_ref }}
+      OMP_NUM_THREADS: '1'
+      OPENBLAS_NUM_THREADS: '1'
+      MKL_NUM_THREADS: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Initialize private scratch
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$TDA_COMMIT" =~ ^[0-9a-f]{40}$ ]] || exit 2
+          TASK_DIR="$RUNNER_TEMP/shared-residual-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          echo "TASK_DIR=$TASK_DIR" >> "$GITHUB_ENV"
+          echo "TEST_SEED=$(python3 -c 'import secrets; print(secrets.randbits(128))')" >> "$GITHUB_ENV"
+          umask 077
+          mkdir -p "$TASK_DIR"
+          printf '{"schema_version":2,"execution_completed":false,"stage":"not_run","exit_code":1}\n' > "$TASK_DIR/summary.json"
+      - name: Checkout pinned private source read-only
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: hubugui1111-lab/tda-ppml-research
+          ref: ${{ inputs.private_ref }}
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          path: private-research
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Install pinned CPU dependencies quietly
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! {
+            sudo apt-get update -qq &&
+            sudo apt-get install -y -qq clang cmake libeigen3-dev libgmp-dev libssl-dev libomp-dev python3-venv &&
+            python3 -m venv "$TASK_DIR/venv" &&
+            "$TASK_DIR/venv/bin/python" -m pip install --disable-pip-version-check numpy==2.1.3 onnx==1.17.0 onnxruntime==1.20.1 &&
+            "$TASK_DIR/venv/bin/python" -m pip check;
+          } > "$TASK_DIR/dependencies.log" 2>&1; then
+            printf '{"schema_version":2,"execution_completed":false,"stage":"dependencies_failed","exit_code":1}\n' > "$TASK_DIR/summary.json"
+            exit 1
+          fi
+      - name: Fetch fixed public nonlinear dependency
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! {
+            git clone --depth 1 https://github.com/cmu-cryptosystems/BOLT.git "$TASK_DIR/BOLT" &&
+            git -C "$TASK_DIR/BOLT" fetch --depth 1 origin 6911b1c26cb0405793e7b5a3e9effe67f659bc49 &&
+            git -C "$TASK_DIR/BOLT" checkout --detach 6911b1c26cb0405793e7b5a3e9effe67f659bc49;
+          } > "$TASK_DIR/fetch.log" 2>&1; then
+            printf '{"schema_version":2,"execution_completed":false,"stage":"dependency_fetch_failed","exit_code":1}\n' > "$TASK_DIR/summary.json"
+            exit 1
+          fi
+      - name: Build private component and primitive regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! {
+            cmake -S private-research/experiments/244_shared_residual_h0 -B "$TASK_DIR/build" \
+              -DBOLT_ROOT="$TASK_DIR/BOLT" -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=clang++ &&
+            cmake --build "$TASK_DIR/build" --parallel 2;
+          } > "$TASK_DIR/build.log" 2>&1; then
+            python3 private-research/scripts/summarize_h0_build_failure.py "$TASK_DIR/build.log" "$TASK_DIR/summary.json"
+            exit 1
+          fi
+      - name: Check private shared residual chain and same-round full cost
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$TASK_DIR/venv/bin/python" private-research/scripts/run_shared_residual_h0.py \
+            --source-sha "$TDA_COMMIT" --build "$TASK_DIR/build" --report "$TASK_DIR/summary.json" \
+            --modes 0 297 307 317 327 --lanes 4 8 --capacity-percent 10 --reference-depth 12 \
+            --real-samples 32 --random-samples 8 --seed "$TEST_SEED" \
+            > "$TASK_DIR/driver.log" 2>&1
+      - name: Upload aggregate summary only
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: margin-certificate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.TASK_DIR }}/summary*.json
+          retention-days: 1
+          if-no-files-found: error
+      - name: Remove private scratch
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$TASK_DIR" in "$RUNNER_TEMP"/shared-residual-*) ;; *) exit 2 ;; esac
+          rm -rf -- "$TASK_DIR" "$GITHUB_WORKSPACE/private-research"
