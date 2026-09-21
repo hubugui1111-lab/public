@@ -1,0 +1,68 @@
+name: h0-functional-product-gate
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/h0-functional-product-gate.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout private research repo READ ONLY
+        uses: actions/checkout@v4
+        with:
+          repository: hubugui1111-lab/tda-ppml-research
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          path: private-research
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Verify functional-product implementation
+        run: |
+          set -euo pipefail
+          cd private-research
+          python -m unittest discover -s tests -p 'test_h0_functional_product.py' -v
+      - name: Gate real 8-filter reachable product
+        run: |
+          set -euo pipefail
+          cd private-research
+          python - <<'PY'
+          import json, time
+          from tools.h0_m2_preprocess.model import ModelSpec, CompileLimitExceeded
+          from tools.h0_m2_preprocess.functional_product import build_functional_product
+          from tools.h0_m2_preprocess.schedules import axis_major_msb
+
+          model=ModelSpec.load("results/local_real_model/exact_patch_model.json")
+          started=time.perf_counter()
+          try:
+              product=build_functional_product(
+                  model,
+                  axis_major_msb(model.domain),
+                  max_states_per_neuron=1048576,
+                  max_layer_width=262144,
+              )
+              result={
+                  "status":"COMPILED",
+                  "elapsed_seconds":time.perf_counter()-started,
+                  "scalar_nodes":list(product.scalar_nodes),
+                  "scalar_build_seconds":product.scalar_build_seconds,
+                  "max_width":product.max_width,
+                  "layered_rows":product.layered_rows,
+                  "final_states":len(product.layers[-1].states),
+                  "depth":product.depth,
+              }
+          except CompileLimitExceeded as exc:
+              result={
+                  "status":"BUDGET_EXCEEDED",
+                  "elapsed_seconds":time.perf_counter()-started,
+                  "error":str(exc),
+              }
+          print("FUNCTIONAL_PRODUCT_REAL", json.dumps(result, sort_keys=True), flush=True)
+          PY
