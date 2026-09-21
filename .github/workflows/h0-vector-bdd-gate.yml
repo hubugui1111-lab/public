@@ -1,0 +1,39 @@
+name: h0-vector-bdd-gate
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/h0-vector-bdd-gate.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout private research repo READ ONLY
+        uses: actions/checkout@v4
+        with:
+          repository: hubugui1111-lab/tda-ppml-research
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          path: private-research
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Verify exact vector quotient on small domains
+        run: |
+          set -euo pipefail
+          cd private-research
+          python -m unittest discover -s tests -p 'test_h0_vector_bdd.py' -v
+      - name: Compile real 8-filter vector function
+        run: |
+          set -euo pipefail
+          cd private-research
+          python -m tools.local_vector_bdd_gate \
+            --raw-cap 2000000 \
+            --node-cap 500000 \
+            --out "$RUNNER_TEMP/vector.json"
