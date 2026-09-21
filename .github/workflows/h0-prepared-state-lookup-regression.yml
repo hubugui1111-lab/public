@@ -1,3 +1,4 @@
+# rerun: include exact SCI A2B-remask bridge
 name: h0-prepared-state-lookup-regression
 
 on:
