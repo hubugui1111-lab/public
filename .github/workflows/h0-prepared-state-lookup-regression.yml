@@ -48,7 +48,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_CXX_COMPILER=clang++
           cmake --build "$RUNNER_TEMP/build" \
-            --target prepared_state_lookup_regression state_key_final_output_regression prepared_state_column_select_regression \
+            --target prepared_state_lookup_regression state_key_final_output_regression prepared_state_column_select_regression a2b_remask_bridge_regression \
             --parallel 2
 
       - name: Run real two-party prepared state lookup
@@ -97,3 +97,20 @@ jobs:
           grep -q "PASS prepared_state_column_select" "$RUNNER_TEMP/bob-columns.log"
           cat "$RUNNER_TEMP/alice-columns.log"
           cat "$RUNNER_TEMP/bob-columns.log"
+
+      - name: Run real arithmetic-share to remasked bit-share bridge
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN="$RUNNER_TEMP/build/a2b_remask_bridge_regression"
+          PORT=39081
+          "$BIN" 1 "$PORT" > "$RUNNER_TEMP/alice-a2b.log" 2>&1 &
+          APID=$!
+          sleep 1
+          "$BIN" 2 "$PORT" > "$RUNNER_TEMP/bob-a2b.log" 2>&1
+          wait "$APID"
+          grep -q "PASS a2b_remask_bridge" "$RUNNER_TEMP/alice-a2b.log"
+          grep -q "PASS a2b_remask_bridge" "$RUNNER_TEMP/bob-a2b.log"
+          grep -q "mismatches=0" "$RUNNER_TEMP/bob-a2b.log"
+          cat "$RUNNER_TEMP/alice-a2b.log"
+          cat "$RUNNER_TEMP/bob-a2b.log"
