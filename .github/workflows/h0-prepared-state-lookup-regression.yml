@@ -69,7 +69,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_CXX_COMPILER=clang++
           cmake --build "$RUNNER_TEMP/build" \
-            --target state_key_serialized_plan_regression state_key_bit_bridge_scale \
+            --target state_key_serialized_plan_regression state_key_bit_bridge_scale state_key_bit_bridge_prepared_scale \
             --parallel 2
 
       - name: Run Python-artifact to real two-party M3-M6
