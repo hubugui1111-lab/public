@@ -62,9 +62,40 @@ jobs:
           set +e
           (
             cd private-research
-            python tools/probe_block_hyperplane_vector_public_mnist.py \
-              --manifest inputs/fresh_public_mnist_block_manifest.json \
-              --output "$TASK_DIR/full-result.json"
+            python - "$TASK_DIR/full-result.json" "$TASK_DIR/exception.json" <<'PY'
+          import json
+          import runpy
+          import sys
+          from pathlib import Path
+
+          output_path = Path(sys.argv[1])
+          exception_path = Path(sys.argv[2])
+          sys.argv = [
+              "tools/probe_block_hyperplane_vector_public_mnist.py",
+              "--manifest",
+              "inputs/fresh_public_mnist_block_manifest.json",
+              "--output",
+              str(output_path),
+          ]
+          try:
+              runpy.run_path(
+                  "tools/probe_block_hyperplane_vector_public_mnist.py",
+                  run_name="__main__",
+              )
+          except BaseException as exc:
+              message = str(exc)
+              for token in ("/home/runner/work/", "/home/runner/"):
+                  message = message.replace(token, "<runner>/")
+              message = message.replace("private-research", "<private-research>")
+              exception_path.write_text(
+                  json.dumps(
+                      {"type": type(exc).__name__, "message": message[:600]},
+                      sort_keys=True,
+                  ),
+                  encoding="utf-8",
+              )
+              raise
+          PY
           ) > "$TASK_DIR/driver.log" 2>&1
           code=$?
           printf '%s\n' "$code" > "$TASK_DIR/exit_code"
@@ -107,7 +138,29 @@ jobs:
           else
             code=1
             [[ ! -s "$TASK_DIR/exit_code" ]] || code=$(cat "$TASK_DIR/exit_code")
-            printf '{"schema_version":1,"status":"fail","experiment_exit_code":%s,"private_ref":"%s","stage":"no_result"}\n' "$code" "$PRIVATE_REF" > "$TASK_DIR/summary.json"
+            python - "$TASK_DIR/summary.json" "$TASK_DIR/exception.json" "$code" "$PRIVATE_REF" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          summary_path = Path(sys.argv[1])
+          exception_path = Path(sys.argv[2])
+          summary = {
+              "schema_version": 1,
+              "status": "fail",
+              "experiment_exit_code": int(sys.argv[3]),
+              "private_ref": sys.argv[4],
+              "stage": "no_result",
+          }
+          if exception_path.is_file():
+              try:
+                  failure = json.loads(exception_path.read_text(encoding="utf-8"))
+                  summary["failure_type"] = failure.get("type", "unknown")
+                  summary["failure_message"] = str(failure.get("message", ""))[:600]
+              except Exception:
+                  summary["failure_type"] = "diagnostic_decode_error"
+          summary_path.write_text(json.dumps(summary, sort_keys=True) + "\n", encoding="utf-8")
+          PY
           fi
 
       - name: Upload short-lived sanitized summary
