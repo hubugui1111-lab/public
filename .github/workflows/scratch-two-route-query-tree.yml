@@ -18,7 +18,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: hubugui1111-lab/tda-ppml-research
-          ref: 9f2556423c673ea0f200f27a6a9e11b7a5213208
+          ref: 10fc8172f7497a9fa0311f55c73f4f0acd385d62
           token: ${{ secrets.PRIVATE_REPO_TOKEN }}
           path: private-research
           persist-credentials: false
@@ -47,7 +47,7 @@ jobs:
           python -m py_compile private-research/experiments/two_route_relu_tree_screen.py
           set +e
           python private-research/experiments/two_route_relu_tree_screen.py \
-            --reservation private-research/results/relu_query_tree_routes/sample_reservation_20260925.json \
+            --reservation private-research/results/relu_query_tree_routes/sample_reservation_20260926.json \
             --out "$RUNNER_TEMP/two-route-summary.json" \
             > "$RUNNER_TEMP/two-route-stdout.json" \
             2> "$RUNNER_TEMP/two-route-stderr.log"
