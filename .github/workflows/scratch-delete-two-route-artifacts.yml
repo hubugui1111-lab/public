@@ -1,0 +1,40 @@
+name: scratch delete two-route screen artifacts
+
+on:
+  push:
+    paths:
+      - .github/workflows/scratch-delete-two-route-artifacts.yml
+
+permissions:
+  actions: write
+
+jobs:
+  delete:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete only this screen's temporary aggregate artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python - <<'PY'
+          import os
+          import urllib.request
+
+          artifact_ids = [10724427628, 10724418364, 10724184699, 10725186293, 10725545422, 10724369399]
+          for artifact_id in artifact_ids:
+              url = f"https://api.github.com/repos/hubugui1111-lab/public/actions/artifacts/{artifact_id}"
+              request = urllib.request.Request(
+                  url,
+                  method="DELETE",
+                  headers={
+                      "Accept": "application/vnd.github+json",
+                      "Authorization": f"Bearer {os.environ['GH_TOKEN']}",
+                      "X-GitHub-Api-Version": "2022-11-28",
+                  },
+              )
+              try:
+                  with urllib.request.urlopen(request, timeout=30) as response:
+                      print(f"artifact {artifact_id}: deleted ({response.status})")
+              except Exception as error:
+                  raise SystemExit(f"artifact {artifact_id}: delete failed ({type(error).__name__})")
+          PY
