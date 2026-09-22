@@ -18,7 +18,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: hubugui1111-lab/tda-ppml-research
-          ref: 78f72404c05a4617845f483d56b7d309463b8fad
+          ref: 9f2556423c673ea0f200f27a6a9e11b7a5213208
           token: ${{ secrets.PRIVATE_REPO_TOKEN }}
           path: private-research
           persist-credentials: false
@@ -47,7 +47,7 @@ jobs:
           python -m py_compile private-research/experiments/two_route_relu_tree_screen.py
           set +e
           python private-research/experiments/two_route_relu_tree_screen.py \
-            --reservation private-research/results/relu_query_tree_routes/sample_reservation_20260924.json \
+            --reservation private-research/results/relu_query_tree_routes/sample_reservation_20260925.json \
             --out "$RUNNER_TEMP/two-route-summary.json" \
             > "$RUNNER_TEMP/two-route-stdout.json" \
             2> "$RUNNER_TEMP/two-route-stderr.log"
@@ -61,7 +61,7 @@ jobs:
           lines = Path(stderr_path).read_text(errors="replace").splitlines()
           site = None
           for line in lines:
-              match = re.search(r'File ".*two_route_relu_tree_screen\\.py", line (\\d+), in ([^ ]+)', line)
+              match = re.search(r'File ".*two_route_relu_tree_screen[.]py", line ([0-9]+), in ([^ ]+)', line)
               if match:
                   site = {"file": "two_route_relu_tree_screen.py", "line": int(match.group(1)), "function": match.group(2)}
           error_type = "unknown"
@@ -71,7 +71,7 @@ jobs:
                   error_type = match.group(1).split(".")[-1]
                   break
           report = {"schema": "OPT_TWO_ROUTE_QUERY_TREE_SCREEN_V1", "status": "failed", "exit_code": int(exit_code), "error_type": error_type, "failure_site": site}
-          Path(summary_path).write_text(json.dumps(report, sort_keys=True) + "\\n")
+          Path(summary_path).write_text(json.dumps(report, sort_keys=True) + chr(10))
           PY
           fi
           test -s "$RUNNER_TEMP/two-route-summary.json"
