@@ -18,7 +18,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: hubugui1111-lab/tda-ppml-research
-          ref: f46c7423192b2f2d34a10d573fa79db9c0f15918
+          ref: 78f72404c05a4617845f483d56b7d309463b8fad
           token: ${{ secrets.PRIVATE_REPO_TOKEN }}
           path: private-research
           persist-credentials: false
@@ -47,14 +47,32 @@ jobs:
           python -m py_compile private-research/experiments/two_route_relu_tree_screen.py
           set +e
           python private-research/experiments/two_route_relu_tree_screen.py \
-            --reservation private-research/results/relu_query_tree_routes/sample_reservation_20260923.json \
+            --reservation private-research/results/relu_query_tree_routes/sample_reservation_20260924.json \
             --out "$RUNNER_TEMP/two-route-summary.json" \
             > "$RUNNER_TEMP/two-route-stdout.json" \
             2> "$RUNNER_TEMP/two-route-stderr.log"
           run_status=$?
           set -e
           if [ "$run_status" -ne 0 ]; then
-            printf '{"schema":"OPT_TWO_ROUTE_QUERY_TREE_SCREEN_V1","status":"failed","exit_code":%s}\n' "$run_status" > "$RUNNER_TEMP/two-route-summary.json"
+            python - "$RUNNER_TEMP/two-route-summary.json" "$RUNNER_TEMP/two-route-stderr.log" "$run_status" <<'PY'
+          import json, re, sys
+          from pathlib import Path
+          summary_path, stderr_path, exit_code = sys.argv[1:]
+          lines = Path(stderr_path).read_text(errors="replace").splitlines()
+          site = None
+          for line in lines:
+              match = re.search(r'File ".*two_route_relu_tree_screen\\.py", line (\\d+), in ([^ ]+)', line)
+              if match:
+                  site = {"file": "two_route_relu_tree_screen.py", "line": int(match.group(1)), "function": match.group(2)}
+          error_type = "unknown"
+          for line in reversed(lines):
+              match = re.match(r'^([A-Za-z_][A-Za-z0-9_.]*(?:Error|Exception|Interrupt|Exit))(?::|$)', line.strip())
+              if match:
+                  error_type = match.group(1).split(".")[-1]
+                  break
+          report = {"schema": "OPT_TWO_ROUTE_QUERY_TREE_SCREEN_V1", "status": "failed", "exit_code": int(exit_code), "error_type": error_type, "failure_site": site}
+          Path(summary_path).write_text(json.dumps(report, sort_keys=True) + "\\n")
+          PY
           fi
           test -s "$RUNNER_TEMP/two-route-summary.json"
 
