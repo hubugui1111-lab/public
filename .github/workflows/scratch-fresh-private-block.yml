@@ -10,7 +10,7 @@ on:
       private_ref:
         description: Immutable private research commit to audit
         required: true
-        default: 9f99a17d04d9966f16757275cd39c2d91495e67f
+        default: 319524b6d00069ffdbb53eaa0d2ecbaac120246d
         type: string
 
 permissions:
@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      PRIVATE_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.private_ref || '9f99a17d04d9966f16757275cd39c2d91495e67f' }}
+      PRIVATE_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.private_ref || '319524b6d00069ffdbb53eaa0d2ecbaac120246d' }}
     steps:
       - name: Initialize private scratch directory
         shell: bash
