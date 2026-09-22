@@ -18,7 +18,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: hubugui1111-lab/tda-ppml-research
-          ref: 10fc8172f7497a9fa0311f55c73f4f0acd385d62
+          ref: 871cac1170aab7959e7de968fe7d03b423984852
           token: ${{ secrets.PRIVATE_REPO_TOKEN }}
           path: private-research
           persist-credentials: false
