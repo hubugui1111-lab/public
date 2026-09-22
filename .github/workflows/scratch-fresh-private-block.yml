@@ -1,0 +1,131 @@
+# Temporary scratch workflow. Private source is checked out read-only and only
+# an allowlisted aggregate summary is uploaded for one day.
+name: scratch fresh private block certificate
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      private_ref:
+        description: Immutable private research commit to audit
+        required: true
+        default: 9f99a17d04d9966f16757275cd39c2d91495e67f
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  scratch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PRIVATE_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.private_ref || '9f99a17d04d9966f16757275cd39c2d91495e67f' }}
+    steps:
+      - name: Initialize private scratch directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$PRIVATE_REF" =~ ^[0-9a-f]{40}$ ]] || exit 2
+          TASK_DIR="$RUNNER_TEMP/fresh-block-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          echo "TASK_DIR=$TASK_DIR" >> "$GITHUB_ENV"
+          umask 077
+          mkdir -p "$TASK_DIR"
+          printf '{"schema_version":1,"status":"not_run","private_ref":"%s"}\n' "$PRIVATE_REF" > "$TASK_DIR/summary.json"
+
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: hubugui1111-lab/tda-ppml-research
+          ref: ${{ env.PRIVATE_REF }}
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          path: private-research
+          fetch-depth: 1
+          persist-credentials: false
+          submodules: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install numeric dependencies quietly
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check numpy scipy > "$TASK_DIR/dependencies.log" 2>&1
+
+      - name: Run fresh real-input experiment quietly
+        id: experiment
+        continue-on-error: true
+        shell: bash
+        run: |
+          set +e
+          (
+            cd private-research
+            python tools/probe_block_hyperplane_vector_public_mnist.py \
+              --manifest inputs/fresh_public_mnist_block_manifest.json \
+              --output "$TASK_DIR/full-result.json"
+          ) > "$TASK_DIR/driver.log" 2>&1
+          code=$?
+          printf '%s\n' "$code" > "$TASK_DIR/exit_code"
+          exit "$code"
+
+      - name: Produce allowlisted aggregate summary
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -s "$TASK_DIR/full-result.json" ]]; then
+            python - "$TASK_DIR/full-result.json" "$TASK_DIR/summary.json" <<'PY'
+          import json
+          import os
+          import sys
+          from pathlib import Path
+
+          source = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+          exit_code = int(Path(os.environ["TASK_DIR"] + "/exit_code").read_text().strip())
+          summary = {
+              "schema_version": 1,
+              "status": "pass" if exit_code == 0 and not source["historical_scan"]["overlap_ids"] and sum(r["wrong_labels"] for r in source["records"]) == 0 else "fail",
+              "experiment_exit_code": exit_code,
+              "private_ref": os.environ["PRIVATE_REF"],
+              "source_sha256": source["source_sha256"],
+              "sample_count": source["sample_count"],
+              "records_count": len(source["records"]),
+              "freshness": {
+                  "used_id_count": source["historical_scan"]["used_id_count"],
+                  "eligible_id_count": source["historical_scan"]["eligible_id_count"],
+                  "overlap_ids": source["historical_scan"]["overlap_ids"],
+                  "input_payload_sha256": source["input_payload_sha256"],
+                  "dataset_sha256": source["dataset_sha256"]
+              },
+              "aggregate": source["summary"],
+              "elapsed_seconds": source["elapsed_seconds"]
+          }
+          Path(sys.argv[2]).write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+          PY
+          else
+            code=1
+            [[ ! -s "$TASK_DIR/exit_code" ]] || code=$(cat "$TASK_DIR/exit_code")
+            printf '{"schema_version":1,"status":"fail","experiment_exit_code":%s,"private_ref":"%s","stage":"no_result"}\n' "$code" "$PRIVATE_REF" > "$TASK_DIR/summary.json"
+          fi
+
+      - name: Upload short-lived sanitized summary
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: fresh-private-block-summary-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.TASK_DIR }}/summary.json
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Remove private checkout and scratch
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "${TASK_DIR:-}" in
+            "$RUNNER_TEMP"/fresh-block-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT) ;;
+            *) exit 2 ;;
+          esac
+          rm -rf -- "$TASK_DIR" "$GITHUB_WORKSPACE/private-research"
