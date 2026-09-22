@@ -169,6 +169,7 @@ jobs:
                   failure = json.loads(exception_path.read_text(encoding="utf-8"))
                   summary["failure_type"] = failure.get("type", "unknown")
                   summary["failure_message"] = str(failure.get("message", ""))[:600]
+                  summary["trace_tail"] = failure.get("trace_tail", [])
               except Exception:
                   summary["failure_type"] = "diagnostic_decode_error"
           summary_path.write_text(json.dumps(summary, sort_keys=True) + "\n", encoding="utf-8")
