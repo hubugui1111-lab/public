@@ -114,6 +114,13 @@ jobs:
             --calib-tokens 400000 --n-fit 256 --n-cal 128 --n-test 128 \
             --min-leaves 16 --seeds 1 --cal-min-occ 8 --max-depth 8 --layers all \
             > "$TASK_DIR/run.log" 2>&1; then
+            echo "Experiment failed; tail of private scratch traceback follows:" >&2
+            tail -n 100 "$TASK_DIR/run.log" >&2 || true
+            if [[ -f "$TASK_DIR/reservation.json" ]]; then
+              echo "sample_reservation_written=true" >&2
+            else
+              echo "sample_reservation_written=false" >&2
+            fi
             printf '{"schema_version":1,"pass":false,"stage":"experiment_failed"}\n' > "$TASK_DIR/summary.json"
             exit 1
           fi
