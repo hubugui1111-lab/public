@@ -14,8 +14,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 240
     env:
-      PRIVATE_SOURCE_SHA: ff97a8bd5a15b476741ac4afcff95aa57d5051bf
-      RESERVATION_SHA256: 1cc63b240977356cd7d30dcfe1b1b1d45bcda0090c0ee36ec100228543c1ff5c
+      PRIVATE_SOURCE_SHA: e73342a64346afa0ac6b8e924d2da710030feec8
+      RESERVATION_SHA256: a0121fff792434d55bc798cf8adc856d983c85bda01108d8a8e458e87798cccd
       HF_HUB_DISABLE_TELEMETRY: "1"
       OMP_NUM_THREADS: "2"
       OPENBLAS_NUM_THREADS: "2"
@@ -45,22 +45,41 @@ jobs:
               log = ""
           frames = re.findall(r'File "([^"]+)", line (\d+), in ([^\n]+)', log)
           exceptions = re.findall(r'^([A-Za-z_][A-Za-z0-9_.]*)(?::|$)', log, re.M)
+          error_lines = re.findall(r'^([A-Za-z_][A-Za-z0-9_.]*(?:Error|Exception)):\\s*(.*)$', log, re.M)
+          error_message = error_lines[-1][1].lower() if error_lines else ""
+          message_patterns = [
+              ("device_mismatch", ("same device", "different devices", "device type")),
+              ("shape_mismatch", ("mat1 and mat2 shapes", "size of tensor", "shape mismatch")),
+              ("meta_tensor", ("meta tensor", "device type meta")),
+              ("memory_pressure", ("out of memory", "cannot allocate memory")),
+          ]
+          message_class = next(
+              (name for name, needles in message_patterns if any(n in error_message for n in needles)),
+              "unclassified" if exceptions else None,
+          )
           signatures = [
               ("out_of_memory", ("out of memory", "oom")),
+              ("device_mismatch", ("same device", "different devices", "device type")),
               ("killed", ("killed",)),
               ("disk_full", ("no space left",)),
               ("network_or_timeout", ("connectionerror", "sslerror", "timed out", "timeout")),
               ("access_denied", ("403", "gated repo", "access denied")),
           ]
           signature = next((name for name, needles in signatures if any(n in log.lower() for n in needles)), None)
+          source_frames = [
+              item for item in frames
+              if os.path.basename(item[0]).startswith("exp157_")
+          ]
+          selected_frames = source_frames[-8:] if source_frames else frames[-12:]
           result = {
               "schema": "COMET_OPT13B_PROBE_MATCH_RESULT_V1",
               "status": status,
               "exit_code": int(exit_code),
               "exception_type": exceptions[-1] if exceptions else None,
+              "exception_message_class": message_class,
               "code_locations": [
                   {"file": os.path.basename(path), "line": int(line), "function": fn.strip()}
-                  for path, line, fn in frames[-3:]
+                  for path, line, fn in selected_frames
               ],
               "failure_signature": signature,
           }
@@ -211,7 +230,7 @@ jobs:
                   for method, values in result.get("alpaca_response_metrics", {}).items()
               }
           else:
-              for key in ("exit_code", "exception_type", "code_locations", "failure_signature"):
+              for key in ("exit_code", "exception_type", "exception_message_class", "code_locations", "failure_signature"):
                   if key in result:
                       safe[key] = result[key]
           print("EXP157_RESULT=" + json.dumps(safe, sort_keys=True))
