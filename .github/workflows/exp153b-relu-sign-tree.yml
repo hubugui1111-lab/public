@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 90
     env:
-      TDA_COMMIT: b053891747d665b279685407c7ba97cb1b8ee7a2
+      TDA_COMMIT: e8860d426f6ed1ca7e82e40c58ebad49d6f6a86e
       HF_HUB_DISABLE_TELEMETRY: '1'
       TOKENIZERS_PARALLELISM: 'false'
       OMP_NUM_THREADS: '1'
@@ -32,13 +32,14 @@ jobs:
           echo "TASK_DIR=$TASK_DIR" >> "$GITHUB_ENV"
           echo "HF_HOME=$TASK_DIR/huggingface" >> "$GITHUB_ENV"
           echo "HF_HUB_CACHE=$TASK_DIR/huggingface/hub" >> "$GITHUB_ENV"
+          echo "MODEL_DIR=$TASK_DIR/opt-125m" >> "$GITHUB_ENV"
           echo "PIP_CACHE_DIR=$TASK_DIR/pip-cache" >> "$GITHUB_ENV"
           echo "WIKITEXT_DIR=$TASK_DIR/huggingface/hub/datasets--Salesforce--wikitext/snapshots/b08601e04326c79dfdd32d625aee71d232d685c3/wikitext-2-raw-v1" >> "$GITHUB_ENV"
       - name: Checkout private experiment read-only
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: hubugui1111-lab/tda-ppml-research
-          ref: b053891747d665b279685407c7ba97cb1b8ee7a2
+          ref: e8860d426f6ed1ca7e82e40c58ebad49d6f6a86e
           token: ${{ secrets.PRIVATE_REPO_TOKEN }}
           path: private-research
           fetch-depth: 1
@@ -72,7 +73,7 @@ jobs:
           snapshot_download(
               repo_id="facebook/opt-125m",
               revision="c41bd9f4e994afdf292a5a3808cb42787f4addc7",
-              cache_dir=os.environ["HF_HUB_CACHE"],
+              local_dir=os.environ["MODEL_DIR"],
           )
           snapshot_download(
               repo_id="Salesforce/wikitext",
@@ -104,7 +105,7 @@ jobs:
         run: |
           set -euo pipefail
           if ! "$TASK_DIR/venv/bin/python" private-research/experiments/153b_relu_sign_tree_fresh.py \
-            --model facebook/opt-125m \
+            --model facebook/opt-125m --model-path "$MODEL_DIR" \
             --model-revision c41bd9f4e994afdf292a5a3808cb42787f4addc7 \
             --dataset-revision b08601e04326c79dfdd32d625aee71d232d685c3 \
             --split test --seed "$EXPERIMENT_SEED" \
