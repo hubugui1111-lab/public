@@ -1,0 +1,52 @@
+name: exp168-seal-certificate-op-bench-v2
+
+on:
+  push:
+    paths:
+      - '.github/workflows/exp168-seal-certificate-op-bench-v2.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  bench:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    env:
+      TDA_COMMIT: 0e02091823c41e6953eb8189f00e9e56b4018570
+    steps:
+      - name: Checkout private source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: hubugui1111-lab/tda-ppml-research
+          ref: ${{ env.TDA_COMMIT }}
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          path: private-research
+          persist-credentials: false
+          fetch-depth: 1
+          submodules: false
+
+      - name: Build Microsoft SEAL 4.1.2
+        run: |
+          git clone --depth 1 --branch v4.1.2 https://github.com/microsoft/SEAL.git
+          cmake -S SEAL -B SEAL/build -DSEAL_BUILD_TESTS=OFF -DSEAL_BUILD_EXAMPLES=OFF
+          cmake --build SEAL/build -j2
+          sudo cmake --install SEAL/build
+
+      - name: Build and run benchmark
+        run: |
+          mkdir -p "$RUNNER_TEMP/exp168"
+          g++ -O3 -std=c++17 private-research/experiments/168_seal_certificate_ops.cpp             -lseal-4.1 -pthread -o "$RUNNER_TEMP/exp168/bench"
+          for rep in 1 2 3; do
+            echo "===== OUTER $rep =====" | tee -a "$RUNNER_TEMP/exp168/result.txt"
+            "$RUNNER_TEMP/exp168/bench" | tee -a "$RUNNER_TEMP/exp168/result.txt"
+          done
+
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: exp168-seal-certificate-ops-${{ github.run_id }}
+          path: ${{ runner.temp }}/exp168/result.txt
+          retention-days: 3
+          if-no-files-found: error
