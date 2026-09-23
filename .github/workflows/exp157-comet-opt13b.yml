@@ -1,0 +1,118 @@
+name: exp157-comet-opt13b
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/exp157-comet-opt13b.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  run:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    env:
+      PRIVATE_SOURCE_SHA: 2fee9721af92db5d0dcdd30180399dd2a91e3e54
+      HF_HOME: ${{ runner.temp }}/exp157-hf
+      HF_HUB_DISABLE_TELEMETRY: "1"
+    steps:
+      - name: Initialize temporary runner workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$PRIVATE_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          EXP157_DIR="$RUNNER_TEMP/exp157-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          echo "EXP157_DIR=$EXP157_DIR" >> "$GITHUB_ENV"
+          umask 077
+          mkdir -p "$EXP157_DIR"
+          printf '{"schema":"COMET_OPT13B_PROBE_MATCH_RESULT_V1","status":"not_started"}\n' > "$EXP157_DIR/summary.json"
+
+      - name: Checkout frozen private research source read-only
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: hubugui1111-lab/tda-ppml-research
+          ref: ${{ env.PRIVATE_SOURCE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          path: private-research
+          fetch-depth: 1
+          persist-credentials: false
+          submodules: false
+
+      - name: Install pinned CPU dependencies quietly
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! {
+            python3 -m venv "$EXP157_DIR/venv" &&
+            "$EXP157_DIR/venv/bin/python" -m pip install --disable-pip-version-check pip==24.3.1 numpy==1.26.4 &&
+            "$EXP157_DIR/venv/bin/python" -m pip install --disable-pip-version-check torch==2.5.1 --index-url https://download.pytorch.org/whl/cpu &&
+            "$EXP157_DIR/venv/bin/python" -m pip install --disable-pip-version-check transformers==4.46.3 datasets==3.1.0 accelerate==1.1.1 safetensors==0.4.5
+          } > "$EXP157_DIR/dependencies.log" 2>&1; then
+            printf '{"schema":"COMET_OPT13B_PROBE_MATCH_RESULT_V1","status":"dependencies_failed"}\n' > "$EXP157_DIR/summary.json"
+            exit 1
+          fi
+
+      - name: Verify reservation and run synthetic preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! {
+            test "$(git -C private-research rev-parse HEAD)" = "$PRIVATE_SOURCE_SHA" &&
+            "$EXP157_DIR/venv/bin/python" -m py_compile private-research/experiments/exp157_opt13b_comet_probe_comparison.py &&
+            "$EXP157_DIR/venv/bin/python" - <<'PY'
+          import runpy
+          from pathlib import Path
+          script = runpy.run_path("private-research/experiments/exp157_opt13b_comet_probe_comparison.py")
+          manifest = script["load_manifest"](Path("private-research/inputs/exp157_comet_opt13b_reservation_20260923.json"))
+          assert manifest["reservation_sha256"] == "2d5636b188faced68b11ef3709629c3db59b1655d6edac33aa78436dc65c0ace"
+          print("reservation verified")
+          PY
+            "$EXP157_DIR/venv/bin/python" private-research/experiments/exp157_opt13b_comet_probe_comparison.py --self-test
+          } > "$EXP157_DIR/preflight.log" 2>&1; then
+            printf '{"schema":"COMET_OPT13B_PROBE_MATCH_RESULT_V1","status":"preflight_failed"}\n' > "$EXP157_DIR/summary.json"
+            exit 1
+          fi
+
+      - name: Run OPT-1.3B matched experiment
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          "$EXP157_DIR/venv/bin/python" private-research/experiments/exp157_opt13b_comet_probe_comparison.py             --reservation private-research/inputs/exp157_comet_opt13b_reservation_20260923.json             --out "$EXP157_DIR/full_result.json"             > "$EXP157_DIR/experiment.log" 2>&1
+          RUN_RC=$?
+          set -e
+          if [[ "$RUN_RC" -eq 0 ]]; then
+            "$EXP157_DIR/venv/bin/python" - "$EXP157_DIR/full_result.json" "$EXP157_DIR/summary.json" <<'PY'
+          import json, sys
+          src, dst = sys.argv[1:]
+          with open(src, encoding="utf-8") as f:
+              result = json.load(f)
+          assert result["status"] == "completed"
+          assert result["reservation_sha256"] == "2d5636b188faced68b11ef3709629c3db59b1655d6edac33aa78436dc65c0ace"
+          with open(dst, "w", encoding="utf-8") as f:
+              json.dump(result, f, indent=2, sort_keys=True)
+              f.write("\n")
+          PY
+          else
+            printf '{"schema":"COMET_OPT13B_PROBE_MATCH_RESULT_V1","status":"experiment_failed","exit_code":%s}\n' "$RUN_RC" > "$EXP157_DIR/summary.json"
+            exit "$RUN_RC"
+          fi
+
+      - name: Upload aggregate result for one day
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: exp157-comet-opt13b-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.EXP157_DIR }}/summary.json
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Remove all private checkout and model scratch data
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$EXP157_DIR" in "$RUNNER_TEMP"/exp157-*) ;; *) exit 2 ;; esac
+          rm -rf -- "$EXP157_DIR" "$GITHUB_WORKSPACE/private-research"
