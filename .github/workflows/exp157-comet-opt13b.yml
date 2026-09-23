@@ -14,20 +14,60 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 240
     env:
-      PRIVATE_SOURCE_SHA: c7c13bac7db7745c572f905e2ad363e5a8c4a32d
+      PRIVATE_SOURCE_SHA: d494bb795a52ba8ca43c5b91d471e911631e65aa
+      RESERVATION_SHA256: 23104c87ee878e075564e8c20f0d529c2477f978471d6eb3b1b622af5c4b7604
       HF_HUB_DISABLE_TELEMETRY: "1"
+      OMP_NUM_THREADS: "2"
+      OPENBLAS_NUM_THREADS: "2"
+      MKL_NUM_THREADS: "2"
+      NUMEXPR_NUM_THREADS: "2"
+      TOKENIZERS_PARALLELISM: "false"
     steps:
       - name: Initialize temporary runner workspace
         shell: bash
         run: |
           set -euo pipefail
           [[ "$PRIVATE_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$RESERVATION_SHA256" =~ ^[0-9a-f]{64}$ ]]
           EXP157_DIR="$RUNNER_TEMP/exp157-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           echo "EXP157_DIR=$EXP157_DIR" >> "$GITHUB_ENV"
           echo "HF_HOME=$EXP157_DIR/hf" >> "$GITHUB_ENV"
           umask 077
           mkdir -p "$EXP157_DIR"
           printf '{"schema":"COMET_OPT13B_PROBE_MATCH_RESULT_V1","status":"not_started"}\n' > "$EXP157_DIR/summary.json"
+          cat > "$EXP157_DIR/summarize_failure.py" <<'PY'
+          import json, os, re, sys
+          log_path, summary_path, status, exit_code = sys.argv[1:]
+          try:
+              with open(log_path, encoding="utf-8", errors="replace") as f:
+                  log = f.read()
+          except OSError:
+              log = ""
+          frames = re.findall(r'File "([^"]+)", line (\d+), in ([^\n]+)', log)
+          exceptions = re.findall(r'^([A-Za-z_][A-Za-z0-9_.]*)(?::|$)', log, re.M)
+          signatures = [
+              ("out_of_memory", ("out of memory", "oom")),
+              ("killed", ("killed",)),
+              ("disk_full", ("no space left",)),
+              ("network_or_timeout", ("connectionerror", "sslerror", "timed out", "timeout")),
+              ("access_denied", ("403", "gated repo", "access denied")),
+          ]
+          signature = next((name for name, needles in signatures if any(n in log.lower() for n in needles)), None)
+          result = {
+              "schema": "COMET_OPT13B_PROBE_MATCH_RESULT_V1",
+              "status": status,
+              "exit_code": int(exit_code),
+              "exception_type": exceptions[-1] if exceptions else None,
+              "code_locations": [
+                  {"file": os.path.basename(path), "line": int(line), "function": fn.strip()}
+                  for path, line, fn in frames[-3:]
+              ],
+              "failure_signature": signature,
+          }
+          with open(summary_path, "w", encoding="utf-8") as f:
+              json.dump(result, f, sort_keys=True)
+              f.write("\n")
+          PY
 
       - name: Checkout frozen private research source read-only
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -50,7 +90,7 @@ jobs:
             "$EXP157_DIR/venv/bin/python" -m pip install --disable-pip-version-check torch==2.5.1 --index-url https://download.pytorch.org/whl/cpu &&
             "$EXP157_DIR/venv/bin/python" -m pip install --disable-pip-version-check transformers==4.46.3 datasets==3.1.0 accelerate==1.1.1 safetensors==0.4.5
           } > "$EXP157_DIR/dependencies.log" 2>&1; then
-            printf '{"schema":"COMET_OPT13B_PROBE_MATCH_RESULT_V1","status":"dependencies_failed"}\n' > "$EXP157_DIR/summary.json"
+            python3 "$EXP157_DIR/summarize_failure.py" "$EXP157_DIR/dependencies.log" "$EXP157_DIR/summary.json" dependencies_failed 1
             exit 1
           fi
 
@@ -61,10 +101,11 @@ jobs:
           if ! {
             test "$(git -C private-research rev-parse HEAD)" = "$PRIVATE_SOURCE_SHA" &&
             "$EXP157_DIR/venv/bin/python" -m py_compile private-research/experiments/exp157_opt13b_comet_probe_comparison.py &&
-            "$EXP157_DIR/venv/bin/python" -c 'import runpy; from pathlib import Path; m=runpy.run_path("private-research/experiments/exp157_opt13b_comet_probe_comparison.py"); d=m["load_manifest"](Path("private-research/inputs/exp157_comet_opt13b_reservation_20260923.json")); assert d["reservation_sha256"] == "0382e34866e4ddd775e9475f9938ec4d6f73ca4bff2fccd3477db4caf9115857"' &&
-            "$EXP157_DIR/venv/bin/python" private-research/experiments/exp157_opt13b_comet_probe_comparison.py --self-test
+            "$EXP157_DIR/venv/bin/python" -c 'import os, runpy; from pathlib import Path; m=runpy.run_path("private-research/experiments/exp157_opt13b_comet_probe_comparison.py"); d=m["load_manifest"](Path("private-research/inputs/exp157_comet_opt13b_reservation_20260923.json")); assert d["reservation_sha256"] == os.environ["RESERVATION_SHA256"]' &&
+            "$EXP157_DIR/venv/bin/python" private-research/experiments/exp157_opt13b_comet_probe_comparison.py --self-test &&
+            "$EXP157_DIR/venv/bin/python" private-research/experiments/exp157_opt13b_comet_probe_comparison.py --reservation private-research/inputs/exp157_comet_opt13b_reservation_20260923.json --data-preflight
           } > "$EXP157_DIR/preflight.log" 2>&1; then
-            printf '{"schema":"COMET_OPT13B_PROBE_MATCH_RESULT_V1","status":"preflight_failed"}\n' > "$EXP157_DIR/summary.json"
+            "$EXP157_DIR/venv/bin/python" "$EXP157_DIR/summarize_failure.py" "$EXP157_DIR/preflight.log" "$EXP157_DIR/summary.json" preflight_failed 1
             exit 1
           fi
 
@@ -77,51 +118,38 @@ jobs:
           RUN_RC=$?
           set -e
           if [[ "$RUN_RC" -eq 0 ]]; then
-            "$EXP157_DIR/venv/bin/python" - "$EXP157_DIR/full_result.json" "$EXP157_DIR/summary.json" <<'PY'
+          "$EXP157_DIR/venv/bin/python" - "$EXP157_DIR/full_result.json" "$EXP157_DIR/summary.json" "$RESERVATION_SHA256" "$PRIVATE_SOURCE_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" <<'PY'
           import json, sys
-          src, dst = sys.argv[1:]
-          with open(src, encoding="utf-8") as f:
-              result = json.load(f)
-          assert result["status"] == "completed"
-          assert result["reservation_sha256"] == "0382e34866e4ddd775e9475f9938ec4d6f73ca4bff2fccd3477db4caf9115857"
+          src, dst, reservation_sha, source_sha, run_id, attempt = sys.argv[1:]
+          try:
+              with open(src, encoding="utf-8") as f:
+                  result = json.load(f)
+              if result.get("status") != "completed":
+                  raise ValueError("result status is not completed")
+              if result.get("reservation_sha256") != reservation_sha:
+                  raise ValueError("result reservation digest mismatch")
+              result["public_runner_provenance"] = {
+                  "repository": "hubugui1111-lab/public",
+                  "run_id": run_id,
+                  "run_attempt": attempt,
+                  "private_source_commit": source_sha,
+              }
+          except Exception as exc:
+              failure = {
+                  "schema": "COMET_OPT13B_PROBE_MATCH_RESULT_V1",
+                  "status": "result_validation_failed",
+                  "exception_type": type(exc).__name__,
+              }
+              with open(dst, "w", encoding="utf-8") as f:
+                  json.dump(failure, f, sort_keys=True)
+                  f.write("\n")
+              sys.exit(1)
           with open(dst, "w", encoding="utf-8") as f:
               json.dump(result, f, indent=2, sort_keys=True)
               f.write("\n")
           PY
           else
-            "$EXP157_DIR/venv/bin/python" - "$EXP157_DIR/experiment.log" "$EXP157_DIR/summary.json" "$RUN_RC" <<'PY'
-          import json, os, re, sys
-          log_path, summary_path, exit_code = sys.argv[1:]
-          try:
-              with open(log_path, encoding="utf-8", errors="replace") as f:
-                  log = f.read()
-          except OSError:
-              log = ""
-          frames = re.findall(r'File "([^"]+)", line (\d+), in ([^\n]+)', log)
-          exceptions = re.findall(r'^([A-Za-z_][A-Za-z0-9_.]*)(?::|$)', log, re.M)
-          signatures = [
-              ("out_of_memory", ("out of memory", "oom")),
-              ("killed", ("killed",)),
-              ("disk_full", ("no space left",)),
-              ("network_or_timeout", ("connectionerror", "sslerror", "timed out", "timeout")),
-              ("access_denied", ("403", "gated repo", "access denied")),
-          ]
-          signature = next((name for name, needles in signatures if any(n in log.lower() for n in needles)), None)
-          result = {
-              "schema": "COMET_OPT13B_PROBE_MATCH_RESULT_V1",
-              "status": "experiment_failed",
-              "exit_code": int(exit_code),
-              "exception_type": exceptions[-1] if exceptions else None,
-              "code_locations": [
-                  {"file": os.path.basename(path), "line": int(line), "function": fn.strip()}
-                  for path, line, fn in frames[-3:]
-              ],
-              "failure_signature": signature,
-          }
-          with open(summary_path, "w", encoding="utf-8") as f:
-              json.dump(result, f, sort_keys=True)
-              f.write("\n")
-          PY
+            "$EXP157_DIR/venv/bin/python" "$EXP157_DIR/summarize_failure.py" "$EXP157_DIR/experiment.log" "$EXP157_DIR/summary.json" experiment_failed "$RUN_RC"
             exit "$RUN_RC"
           fi
 
@@ -133,6 +161,61 @@ jobs:
           path: ${{ env.EXP157_DIR }}/summary.json
           if-no-files-found: error
           retention-days: 1
+
+      - name: Emit sanitized result summary in job log
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - "$EXP157_DIR/summary.json" <<'PY'
+          import json, os, sys
+          path = sys.argv[1]
+          try:
+              with open(path, encoding="utf-8") as f:
+                  result = json.load(f)
+          except Exception as exc:
+              result = {"status": "summary_unreadable", "exception_type": type(exc).__name__}
+          safe = {
+              "status": result.get("status"),
+              "public_run_id": os.environ.get("GITHUB_RUN_ID"),
+              "private_source_commit": os.environ.get("PRIVATE_SOURCE_SHA"),
+          }
+          if result.get("status") == "completed":
+              safe["reservation_sha256"] = result.get("reservation_sha256")
+              safe["runtime_versions"] = result.get("runtime_versions", {})
+              mask_keys = (
+                  "valid_token_vectors", "relu_coordinates", "actual_active_coordinates",
+                  "actual_active_fraction", "actual_active_on_predicted_coordinates",
+                  "predicted_active_coordinates", "predicted_inactive_coordinates",
+                  "prediction_coverage_fraction", "prediction_error_rate", "active_precision",
+                  "prediction_metric_coordinates",
+                  "active_recall", "mask_bit_accuracy", "false_positive_active_predictions",
+                  "false_negative_active_predictions", "predicted_mask_vector_exact_rate",
+                  "predicted_mask_vectors_evaluated",
+                  "activation_output_vector_exact_rate", "relu_comparisons_skipped_by_prediction",
+                  "probe_path_comparisons", "exact_fallback_comparisons",
+                  "native_relu_comparisons_after_route", "predictor_threshold_comparisons",
+                  "total_comparison_count_including_predictor", "total_comparison_over_dense_fraction",
+                  "total_comparison_reduction_fraction",
+              )
+              safe["mask_prediction_metrics"] = {
+                  method: {key: values.get(key) for key in mask_keys}
+                  for method, values in result.get("mask_prediction_metrics", {}).items()
+              }
+              response_keys = (
+                  "alpaca_response_token_top1_accuracy", "mean_target_token_nll",
+                  "teacher_forced_16_token_all_top1_correct_rate", "top1_agreement_with_dense",
+              )
+              safe["alpaca_response_metrics"] = {
+                  method: {key: values.get(key) for key in response_keys}
+                  for method, values in result.get("alpaca_response_metrics", {}).items()
+              }
+          else:
+              for key in ("exit_code", "exception_type", "code_locations", "failure_signature"):
+                  if key in result:
+                      safe[key] = result[key]
+          print("EXP157_RESULT=" + json.dumps(safe, sort_keys=True))
+          PY
 
       - name: Remove all private checkout and model scratch data
         if: always()
