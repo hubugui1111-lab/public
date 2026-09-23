@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 25
     env:
-      TDA_COMMIT: acefe6609b74e100820357d7c6d3e8f9aa6564d5
+      TDA_COMMIT: e6e6ebd4ad06b8242b22d0ab4198d4b0c2b2fe44
       EMP_TAG: v1.0.0-alpha.1
     steps:
       - name: Init
