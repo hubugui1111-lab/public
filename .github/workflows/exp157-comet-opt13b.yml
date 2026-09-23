@@ -14,8 +14,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 240
     env:
-      PRIVATE_SOURCE_SHA: e73342a64346afa0ac6b8e924d2da710030feec8
-      RESERVATION_SHA256: a0121fff792434d55bc798cf8adc856d983c85bda01108d8a8e458e87798cccd
+      PRIVATE_SOURCE_SHA: b6af55c228c5f019b2b21d5150d0f709c8a66cf0
+      RESERVATION_SHA256: 936cde5a1c25e80c9bea953ec87043dfc3924469e3bd10c63b88c7fda0176edb
       HF_HUB_DISABLE_TELEMETRY: "1"
       OMP_NUM_THREADS: "2"
       OPENBLAS_NUM_THREADS: "2"
@@ -45,8 +45,9 @@ jobs:
               log = ""
           frames = re.findall(r'File "([^"]+)", line (\d+), in ([^\n]+)', log)
           exceptions = re.findall(r'^([A-Za-z_][A-Za-z0-9_.]*)(?::|$)', log, re.M)
-          error_lines = re.findall(r'^([A-Za-z_][A-Za-z0-9_.]*(?:Error|Exception)):\\s*(.*)$', log, re.M)
+          error_lines = re.findall(r'^([A-Za-z_][A-Za-z0-9_.]*(?:Error|Exception)):\s*(.*)$', log, re.M)
           error_message = error_lines[-1][1].lower() if error_lines else ""
+          device_mentions = sorted(set(re.findall(r'\b(?:cpu|meta|cuda(?::\d+)?)\b', error_message)))
           message_patterns = [
               ("device_mismatch", ("same device", "different devices", "device type")),
               ("shape_mismatch", ("mat1 and mat2 shapes", "size of tensor", "shape mismatch")),
@@ -77,6 +78,7 @@ jobs:
               "exit_code": int(exit_code),
               "exception_type": exceptions[-1] if exceptions else None,
               "exception_message_class": message_class,
+              "device_mentions": device_mentions,
               "code_locations": [
                   {"file": os.path.basename(path), "line": int(line), "function": fn.strip()}
                   for path, line, fn in selected_frames
@@ -230,7 +232,7 @@ jobs:
                   for method, values in result.get("alpaca_response_metrics", {}).items()
               }
           else:
-              for key in ("exit_code", "exception_type", "exception_message_class", "code_locations", "failure_signature"):
+              for key in ("exit_code", "exception_type", "exception_message_class", "device_mentions", "code_locations", "failure_signature"):
                   if key in result:
                       safe[key] = result[key]
           print("EXP157_RESULT=" + json.dumps(safe, sort_keys=True))
