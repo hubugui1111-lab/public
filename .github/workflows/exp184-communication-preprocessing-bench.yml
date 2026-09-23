@@ -1,0 +1,115 @@
+name: exp184-communication-preprocessing-bench
+
+on:
+  push:
+    paths:
+      - '.github/workflows/exp184-communication-preprocessing-bench.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  bench:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    env:
+      TDA_COMMIT: acefe6609b74e100820357d7c6d3e8f9aa6564d5
+      EMP_TAG: v1.0.0-alpha.1
+    steps:
+      - name: Init
+        run: |
+          set -euo pipefail
+          TASK_DIR="$RUNNER_TEMP/exp184-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          echo "TASK_DIR=$TASK_DIR" >> "$GITHUB_ENV"
+          mkdir -p "$TASK_DIR/result" "$TASK_DIR/prefix"
+
+      - name: Checkout private benchmark
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: hubugui1111-lab/tda-ppml-research
+          ref: ${{ env.TDA_COMMIT }}
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          path: private-research
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Build emp-tool and emp-ot pinned
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch "$EMP_TAG" https://github.com/emp-toolkit/emp-tool.git "$TASK_DIR/emp-tool"
+          git clone --depth 1 --branch "$EMP_TAG" https://github.com/emp-toolkit/emp-ot.git "$TASK_DIR/emp-ot"
+
+          cmake -S "$TASK_DIR/emp-tool" -B "$TASK_DIR/emp-tool/build"             -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$TASK_DIR/prefix"
+          cmake --build "$TASK_DIR/emp-tool/build" --parallel 2
+          cmake --install "$TASK_DIR/emp-tool/build"
+
+          cmake -S "$TASK_DIR/emp-ot" -B "$TASK_DIR/emp-ot/build"             -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$TASK_DIR/prefix"             -DCMAKE_PREFIX_PATH="$TASK_DIR/prefix" -DEMP_OT_AUTO_TUNE=OFF             -DEMP_OT_BUILD_TESTS=OFF
+          cmake --build "$TASK_DIR/emp-ot/build" --parallel 2
+          cmake --install "$TASK_DIR/emp-ot/build"
+
+      - name: Build Exp184
+        run: |
+          set -euo pipefail
+          mkdir -p "$TASK_DIR/bench"
+          cat > "$TASK_DIR/bench/CMakeLists.txt" <<EOF
+          cmake_minimum_required(VERSION 3.25)
+          project(exp184 LANGUAGES CXX)
+          find_package(emp-tool CONFIG REQUIRED)
+          find_package(emp-ot CONFIG REQUIRED)
+          add_executable(exp184 "$GITHUB_WORKSPACE/private-research/experiments/184_emp_ot_preprocessing_benchmark.cpp")
+          target_link_libraries(exp184 PRIVATE emp-ot::emp-ot)
+          target_compile_features(exp184 PRIVATE cxx_std_20)
+          EOF
+          cmake -S "$TASK_DIR/bench" -B "$TASK_DIR/bench/build"             -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$TASK_DIR/prefix"
+          cmake --build "$TASK_DIR/bench/build" --parallel 2
+
+      - name: Run matched correlation backends
+        run: |
+          set -euo pipefail
+          for mode in iknp soft4 soft8 silent; do
+            echo "===== $mode =====" | tee -a "$TASK_DIR/result/raw.log"
+            EMP_RUN_TIMEOUT=240 "$TASK_DIR/emp-ot/run" "$TASK_DIR/bench/build/exp184" "$mode"               2>&1 | tee -a "$TASK_DIR/result/raw.log"
+          done
+
+          TASK="$TASK_DIR" python3 - <<'PY'
+          import json,os,pathlib
+          p=pathlib.Path(os.environ["TASK"])/"result"/"raw.log"
+          groups={}
+          for line in p.read_text().splitlines():
+              if line.startswith("RESULT "):
+                  row=json.loads(line[7:])
+                  groups.setdefault(row["mode"],[]).append(row)
+          out={"experiment":"Exp184 Exp180-scale communication preprocessing benchmark",
+               "requested_correlations":84612,"modes":{}}
+          for mode,rows in groups.items():
+              if len(rows)!=2:
+                  raise SystemExit(f"{mode}: expected 2 party rows, got {len(rows)}")
+              if mode=="silentferret_b10":
+                  out["modes"][mode]={
+                      "begin_ms_max":max(r["begin_ms"] for r in rows),
+                      "consume_ms_max":max(r["consume_ms"] for r in rows),
+                      "end_ms_max":max(r["end_ms"] for r in rows),
+                      "wire_bytes_max_party_view":max(r["total_bytes"] for r in rows),
+                      "consume_bytes_max_party_view":max(r["consume_bytes"] for r in rows),
+                  }
+              else:
+                  out["modes"][mode]={
+                      "ms_max":max(r["ms"] for r in rows),
+                      "wire_bytes_max_party_view":max(r["total_bytes"] for r in rows),
+                      "bytes_per_requested_max":max(r["bytes_per_requested"] for r in rows),
+                  }
+          out["reference_exp180_prepare_bytes"]=2965506
+          (pathlib.Path(os.environ["TASK"])/"result"/"summary.json").write_text(json.dumps(out,indent=2))
+          print(json.dumps(out,indent=2))
+          PY
+
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: exp184-communication-${{ github.run_id }}
+          path: |
+            ${{ env.TASK_DIR }}/result/summary.json
+            ${{ env.TASK_DIR }}/result/raw.log
+          retention-days: 3
+          if-no-files-found: warn
