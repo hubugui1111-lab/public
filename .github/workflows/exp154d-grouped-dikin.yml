@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 45
     env:
-      TDA_COMMIT: b3af7004ecdadb0c2aa2e4589533ce6b4c711e89
+      TDA_COMMIT: 8062f9ee8e83389b2c4fb3e072685d124a2e7cb6
       OMP_NUM_THREADS: '1'
       MKL_NUM_THREADS: '1'
       OPENBLAS_NUM_THREADS: '1'
