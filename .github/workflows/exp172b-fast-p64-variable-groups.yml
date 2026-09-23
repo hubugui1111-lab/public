@@ -1,0 +1,61 @@
+name: exp172b-fast-p64-variable-groups
+on:
+  push:
+    paths:
+      - '.github/workflows/exp172b-fast-p64-variable-groups.yml'
+permissions:
+  contents: read
+  actions: read
+jobs:
+  run:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 12
+    env:
+      TDA_COMMIT: be094be36387e4d68134b2e16a116226bd8323d2
+      PYTHONDONTWRITEBYTECODE: '1'
+      OMP_NUM_THREADS: '2'
+      MKL_NUM_THREADS: '2'
+      OPENBLAS_NUM_THREADS: '1'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: hubugui1111-lab/tda-ppml-research
+          ref: ${{ env.TDA_COMMIT }}
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          path: private-research
+          persist-credentials: false
+          fetch-depth: 1
+      - uses: actions/download-artifact@v4
+        with:
+          name: exp170-frozen-35886052689
+          path: exp170/frozen
+          github-token: ${{ github.token }}
+          repository: hubugui1111-lab/public
+          run-id: 35886052689
+      - uses: actions/download-artifact@v4
+        with:
+          name: exp170-select-35886052689
+          path: exp170/select
+          github-token: ${{ github.token }}
+          repository: hubugui1111-lab/public
+          run-id: 35886052689
+      - uses: actions/download-artifact@v4
+        with:
+          name: exp170-test-35886052689
+          path: exp170/test
+          github-token: ${{ github.token }}
+          repository: hubugui1111-lab/public
+          run-id: 35886052689
+      - run: |
+          python3 -m venv venv
+          venv/bin/pip install --disable-pip-version-check numpy==2.1.3
+      - run: |
+          mkdir -p result
+          venv/bin/python private-research/experiments/172b_fast_p64_variable_groups.py             --frozen exp170/frozen/frozen.pkl             --select-values exp170/select/select_values.npy             --test-values exp170/test/test_values.npy             --out result/summary.json | tee result/driver.log
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: exp172b-fast-${{ github.run_id }}
+          path: result/
+          retention-days: 3
+          if-no-files-found: error
