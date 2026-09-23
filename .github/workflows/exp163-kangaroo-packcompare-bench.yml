@@ -1,0 +1,76 @@
+name: exp163-kangaroo-packcompare-bench
+
+on:
+  push:
+    paths:
+      - '.github/workflows/exp163-kangaroo-packcompare-bench.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  bench:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake g++ make git
+
+      - name: Build Microsoft SEAL 4.1.2
+        run: |
+          git clone --depth 1 --branch v4.1.2 https://github.com/microsoft/SEAL.git
+          cmake -S SEAL -B SEAL/build -DSEAL_BUILD_TESTS=OFF -DSEAL_BUILD_EXAMPLES=OFF
+          cmake --build SEAL/build -j2
+          sudo cmake --install SEAL/build
+
+      - name: Checkout Kangaroo pinned
+        run: |
+          git clone https://github.com/pigeon-xw/Kangaroo.git kangaroo
+          cd kangaroo
+          git checkout e76e69a5a65ed6a62a8c2721f76dbfba73773097
+
+      - name: Build Kangaroo comparison benchmark
+        run: |
+          cmake -S "kangaroo/Kangaroo for client-server model-time" -B kangaroo_time_build
+          cmake --build kangaroo_time_build -j2
+
+      - name: Run packed comparison benchmark
+        run: |
+          mkdir -p "$RUNNER_TEMP/exp163"
+          for rep in 1 2 3 4 5; do
+            echo "===== REP $rep interactive =====" | tee -a "$RUNNER_TEMP/exp163/bench.log"
+            (cd "kangaroo/Kangaroo for client-server model-time/build" && ./examples 0)               2>&1 | tee -a "$RUNNER_TEMP/exp163/bench.log"
+          done
+          RUNNER_TEMP_ENV="$RUNNER_TEMP" python3 - <<'PY' | tee "$RUNNER_TEMP/exp163/summary.txt"
+          import re, statistics, pathlib, os
+          p=pathlib.Path(os.environ["RUNNER_TEMP_ENV"])/"exp163"/"bench.log"
+          s=p.read_text()
+          client=[float(x) for x in re.findall(r"Client secure comparison time:\s*([0-9.]+)ms",s)]
+          server=[float(x) for x in re.findall(r"Server secure comparison time:\s*([0-9.]+)ms",s)]
+          total=[a+b for a,b in zip(client,server)]
+          print("client_ms",client)
+          print("server_ms",server)
+          print("total_ms",total)
+          if total:
+              med=statistics.median(total)
+              print("median_total_ms",med)
+              print("mean_total_ms",statistics.mean(total))
+              print("packed_slots",8192)
+              exp159=3120.513671875
+              print("exp159_scalar_comparisons_mean",exp159)
+              print("fits_one_ciphertext",exp159 <= 8192)
+              print("amortized_us_per_exp159_scalar_if_one_pack", med*1000/exp159)
+          PY
+
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: exp163-kangaroo-packcompare-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/exp163/bench.log
+            ${{ runner.temp }}/exp163/summary.txt
+          retention-days: 3
+          if-no-files-found: warn
