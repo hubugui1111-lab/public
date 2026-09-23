@@ -15,7 +15,6 @@ jobs:
     timeout-minutes: 240
     env:
       PRIVATE_SOURCE_SHA: 2fee9721af92db5d0dcdd30180399dd2a91e3e54
-      HF_HOME: ${{ runner.temp }}/exp157-hf
       HF_HUB_DISABLE_TELEMETRY: "1"
     steps:
       - name: Initialize temporary runner workspace
@@ -25,6 +24,7 @@ jobs:
           [[ "$PRIVATE_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
           EXP157_DIR="$RUNNER_TEMP/exp157-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           echo "EXP157_DIR=$EXP157_DIR" >> "$GITHUB_ENV"
+          echo "HF_HOME=$EXP157_DIR/hf" >> "$GITHUB_ENV"
           umask 077
           mkdir -p "$EXP157_DIR"
           printf '{"schema":"COMET_OPT13B_PROBE_MATCH_RESULT_V1","status":"not_started"}\n' > "$EXP157_DIR/summary.json"
@@ -61,14 +61,7 @@ jobs:
           if ! {
             test "$(git -C private-research rev-parse HEAD)" = "$PRIVATE_SOURCE_SHA" &&
             "$EXP157_DIR/venv/bin/python" -m py_compile private-research/experiments/exp157_opt13b_comet_probe_comparison.py &&
-            "$EXP157_DIR/venv/bin/python" - <<'PY'
-          import runpy
-          from pathlib import Path
-          script = runpy.run_path("private-research/experiments/exp157_opt13b_comet_probe_comparison.py")
-          manifest = script["load_manifest"](Path("private-research/inputs/exp157_comet_opt13b_reservation_20260923.json"))
-          assert manifest["reservation_sha256"] == "2d5636b188faced68b11ef3709629c3db59b1655d6edac33aa78436dc65c0ace"
-          print("reservation verified")
-          PY
+            "$EXP157_DIR/venv/bin/python" -c 'import runpy; from pathlib import Path; m=runpy.run_path("private-research/experiments/exp157_opt13b_comet_probe_comparison.py"); d=m["load_manifest"](Path("private-research/inputs/exp157_comet_opt13b_reservation_20260923.json")); assert d["reservation_sha256"] == "2d5636b188faced68b11ef3709629c3db59b1655d6edac33aa78436dc65c0ace"' &&
             "$EXP157_DIR/venv/bin/python" private-research/experiments/exp157_opt13b_comet_probe_comparison.py --self-test
           } > "$EXP157_DIR/preflight.log" 2>&1; then
             printf '{"schema":"COMET_OPT13B_PROBE_MATCH_RESULT_V1","status":"preflight_failed"}\n' > "$EXP157_DIR/summary.json"
@@ -80,7 +73,7 @@ jobs:
         run: |
           set -euo pipefail
           set +e
-          "$EXP157_DIR/venv/bin/python" private-research/experiments/exp157_opt13b_comet_probe_comparison.py             --reservation private-research/inputs/exp157_comet_opt13b_reservation_20260923.json             --out "$EXP157_DIR/full_result.json"             > "$EXP157_DIR/experiment.log" 2>&1
+          "$EXP157_DIR/venv/bin/python" private-research/experiments/exp157_opt13b_comet_probe_comparison.py --reservation private-research/inputs/exp157_comet_opt13b_reservation_20260923.json --out "$EXP157_DIR/full_result.json" > "$EXP157_DIR/experiment.log" 2>&1
           RUN_RC=$?
           set -e
           if [[ "$RUN_RC" -eq 0 ]]; then
