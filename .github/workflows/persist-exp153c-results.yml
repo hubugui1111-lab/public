@@ -1,0 +1,86 @@
+name: persist-exp153c-results
+on:
+  push:
+    paths:
+      - '.github/workflows/persist-exp153c-results.yml'
+permissions:
+  contents: read
+  actions: read
+jobs:
+  persist:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Download Exp153c artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          curl -fL             -H "Authorization: Bearer $GH_TOKEN"             -H "Accept: application/vnd.github+json"             "https://api.github.com/repos/hubugui1111-lab/public/actions/artifacts/10747912216/zip"             -o /tmp/exp153c.zip
+          mkdir /tmp/exp153c
+          unzip -q /tmp/exp153c.zip -d /tmp/exp153c
+          test -s /tmp/exp153c/summary.json
+      - name: Checkout private research main
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: hubugui1111-lab/tda-ppml-research
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          path: private-research
+          fetch-depth: 1
+      - name: Persist result and note
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd private-research
+          cp /tmp/exp153c/summary.json results/exp153c_relu_probe_tree_cal_support_sweep.json
+          cat > notes/EXP153C_RELU_PROBE_TREE_CAL_SUPPORT_SWEEP.md <<'EOF'
+# EXP153c — literal ReLU probe-tree CAL-support sweep
+
+Run: public GitHub Actions run 35855720784, private source commit `e118e96effd706d5a7ffc030aabec465c1d27fba`.
+
+## What was tested
+
+The implementation follows the literal protocol:
+
+1. FIT alone chooses each real ReLU probe by weighted child sign-purity.
+2. CAL alone fills each reached leaf with coordinates that are all-positive or all-negative.
+3. TEST is loaded only after the tree and all CAL certificates are frozen.
+4. Online cost counts the path probes as ordinary ReLU sign comparisons; inferred non-probe signs are the only omitted comparisons.
+
+This run uses a fresh cohort excluding Exp153b rows, OPT-125M layer 0, F=3072, FIT=1024 and TEST=512.  The same frozen tree is evaluated while the CAL support is swept.
+
+## Result
+
+| Depth | CAL | attempted inferred bits | mean wrong bits / TEST input | TEST rows with any wrong inference |
+|---:|---:|---:|---:|---:|
+| 1 | 32 | 1317.05 | 34.08 | 501 / 512 |
+| 1 | 64 | 850.16 | 12.88 | 471 / 512 |
+| 1 | 128 | 627.74 | 5.13 | 345 / 512 |
+| 1 | 256 | 422.61 | 2.03 | 157 / 512 |
+| 1 | 512 | 250.32 | 0.69 | 81 / 512 |
+| 1 | 1024 | 153.92 | 0.26 | 43 / 512 |
+| 2 | 32 | 1741.81 | 59.73 | 504 / 512 |
+| 2 | 64 | 1307.83 | 23.86 | 487 / 512 |
+| 2 | 128 | 1067.42 | 11.35 | 426 / 512 |
+| 2 | 256 | 858.13 | 5.90 | 263 / 512 |
+| 2 | 512 | 640.80 | 2.45 | 166 / 512 |
+| 2 | 1024 | 487.34 | 1.13 | 109 / 512 |
+
+The nominal inferred-bit count rises sharply when CAL support is reduced, but this is not an exact saving: at depth 2 / CAL=32, 1741.81 bits are marked for inference while 504/512 TEST inputs contain at least one wrong inferred sign.
+
+The historical negative-purity expression `(~samples).any(0) == False` was also reproduced as a diagnostic.  At full CAL it yields only 6.24 attempted bits at depth 1 and 9.36 at depth 2, with every TEST row containing an error, so that particular bug does not explain a 1989/2087 result.
+
+A FIT-as-CAL diagnostic gives 220.70 / 525.44 attempted bits at depths 1/2, also far below 1989/2087.
+
+## Current interpretation
+
+On two independent held-out runs, the literal method does not reproduce roughly 1989 / 2087 inferred bits when CAL has 1024 fresh samples.  Reducing CAL support pushes the nominal count toward that range but simultaneously destroys exact held-out correctness.  Exp153d continues the sweep below CAL=32 on a new TEST split to determine whether the nominal count crosses 1989 and quantify the resulting error.
+
+Full sampled IDs, hashes and per-setting metrics are in `results/exp153c_relu_probe_tree_cal_support_sweep.json`.
+
+EOF
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add results/exp153c_relu_probe_tree_cal_support_sweep.json notes/EXP153C_RELU_PROBE_TREE_CAL_SUPPORT_SWEEP.md
+          git commit -m "Record Exp153c ReLU probe-tree CAL support sweep"
+          git pull --rebase origin main
+          git push origin HEAD:main
