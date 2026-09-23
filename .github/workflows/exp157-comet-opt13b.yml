@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 240
     env:
-      PRIVATE_SOURCE_SHA: 2fee9721af92db5d0dcdd30180399dd2a91e3e54
+      PRIVATE_SOURCE_SHA: c7c13bac7db7745c572f905e2ad363e5a8c4a32d
       HF_HUB_DISABLE_TELEMETRY: "1"
     steps:
       - name: Initialize temporary runner workspace
@@ -61,7 +61,7 @@ jobs:
           if ! {
             test "$(git -C private-research rev-parse HEAD)" = "$PRIVATE_SOURCE_SHA" &&
             "$EXP157_DIR/venv/bin/python" -m py_compile private-research/experiments/exp157_opt13b_comet_probe_comparison.py &&
-            "$EXP157_DIR/venv/bin/python" -c 'import runpy; from pathlib import Path; m=runpy.run_path("private-research/experiments/exp157_opt13b_comet_probe_comparison.py"); d=m["load_manifest"](Path("private-research/inputs/exp157_comet_opt13b_reservation_20260923.json")); assert d["reservation_sha256"] == "2d5636b188faced68b11ef3709629c3db59b1655d6edac33aa78436dc65c0ace"' &&
+            "$EXP157_DIR/venv/bin/python" -c 'import runpy; from pathlib import Path; m=runpy.run_path("private-research/experiments/exp157_opt13b_comet_probe_comparison.py"); d=m["load_manifest"](Path("private-research/inputs/exp157_comet_opt13b_reservation_20260923.json")); assert d["reservation_sha256"] == "0382e34866e4ddd775e9475f9938ec4d6f73ca4bff2fccd3477db4caf9115857"' &&
             "$EXP157_DIR/venv/bin/python" private-research/experiments/exp157_opt13b_comet_probe_comparison.py --self-test
           } > "$EXP157_DIR/preflight.log" 2>&1; then
             printf '{"schema":"COMET_OPT13B_PROBE_MATCH_RESULT_V1","status":"preflight_failed"}\n' > "$EXP157_DIR/summary.json"
@@ -83,13 +83,45 @@ jobs:
           with open(src, encoding="utf-8") as f:
               result = json.load(f)
           assert result["status"] == "completed"
-          assert result["reservation_sha256"] == "2d5636b188faced68b11ef3709629c3db59b1655d6edac33aa78436dc65c0ace"
+          assert result["reservation_sha256"] == "0382e34866e4ddd775e9475f9938ec4d6f73ca4bff2fccd3477db4caf9115857"
           with open(dst, "w", encoding="utf-8") as f:
               json.dump(result, f, indent=2, sort_keys=True)
               f.write("\n")
           PY
           else
-            printf '{"schema":"COMET_OPT13B_PROBE_MATCH_RESULT_V1","status":"experiment_failed","exit_code":%s}\n' "$RUN_RC" > "$EXP157_DIR/summary.json"
+            "$EXP157_DIR/venv/bin/python" - "$EXP157_DIR/experiment.log" "$EXP157_DIR/summary.json" "$RUN_RC" <<'PY'
+          import json, os, re, sys
+          log_path, summary_path, exit_code = sys.argv[1:]
+          try:
+              with open(log_path, encoding="utf-8", errors="replace") as f:
+                  log = f.read()
+          except OSError:
+              log = ""
+          frames = re.findall(r'File "([^"]+)", line (\d+), in ([^\n]+)', log)
+          exceptions = re.findall(r'^([A-Za-z_][A-Za-z0-9_.]*)(?::|$)', log, re.M)
+          signatures = [
+              ("out_of_memory", ("out of memory", "oom")),
+              ("killed", ("killed",)),
+              ("disk_full", ("no space left",)),
+              ("network_or_timeout", ("connectionerror", "sslerror", "timed out", "timeout")),
+              ("access_denied", ("403", "gated repo", "access denied")),
+          ]
+          signature = next((name for name, needles in signatures if any(n in log.lower() for n in needles)), None)
+          result = {
+              "schema": "COMET_OPT13B_PROBE_MATCH_RESULT_V1",
+              "status": "experiment_failed",
+              "exit_code": int(exit_code),
+              "exception_type": exceptions[-1] if exceptions else None,
+              "code_locations": [
+                  {"file": os.path.basename(path), "line": int(line), "function": fn.strip()}
+                  for path, line, fn in frames[-3:]
+              ],
+              "failure_signature": signature,
+          }
+          with open(summary_path, "w", encoding="utf-8") as f:
+              json.dump(result, f, sort_keys=True)
+              f.write("\n")
+          PY
             exit "$RUN_RC"
           fi
 
