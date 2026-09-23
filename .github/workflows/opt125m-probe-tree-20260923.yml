@@ -49,7 +49,7 @@ jobs:
           set -euo pipefail
           cd private-research
           "$RUNNER_TEMP/venv/bin/python" experiments/exp156_opt125m_probe_tree_wikitext103.py \
-            --reservation inputs/opt125m_probe_wikitext103_reservation_20260923.json \
+            --reservation inputs/opt125m_probe_wikitext103_reservation_20260923_v2.json \
             --out "$RUNNER_TEMP/probe-tree-report.json"
       - uses: actions/upload-artifact@v4
         with:
