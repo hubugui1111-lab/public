@@ -1,0 +1,73 @@
+name: exp180b-overflow-private-tail-bench
+
+on:
+  push:
+    paths:
+      - '.github/workflows/exp180b-overflow-private-tail-bench.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  bench:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 18
+    env:
+      TDA_COMMIT: c9b75f310f1004a95d01b3083bc4de94bcb3eca2
+      OMP_NUM_THREADS: '1'
+      MKL_NUM_THREADS: '1'
+      OPENBLAS_NUM_THREADS: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Init
+        run: |
+          set -euo pipefail
+          TASK_DIR="$RUNNER_TEMP/exp180b-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          echo "TASK_DIR=$TASK_DIR" >> "$GITHUB_ENV"
+          mkdir -p "$TASK_DIR"
+
+      - name: Checkout private source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: hubugui1111-lab/tda-ppml-research
+          ref: ${{ env.TDA_COMMIT }}
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          path: private-research
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Install
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq clang cmake libeigen3-dev libgmp-dev libssl-dev libomp-dev python3-venv
+
+      - name: Fetch pinned BOLT
+        run: |
+          set -euo pipefail
+          git clone --depth 1 https://github.com/cmu-cryptosystems/BOLT.git "$TASK_DIR/BOLT"
+          git -C "$TASK_DIR/BOLT" fetch --depth 1 origin 6911b1c26cb0405793e7b5a3e9effe67f659bc49
+          git -C "$TASK_DIR/BOLT" checkout --detach 6911b1c26cb0405793e7b5a3e9effe67f659bc49
+
+      - name: Build
+        run: |
+          set -euo pipefail
+          cmake -S private-research/experiments/244_shared_residual_h0 -B "$TASK_DIR/build"             -DBOLT_ROOT="$TASK_DIR/BOLT" -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=clang++
+          cmake --build "$TASK_DIR/build" --target exp180_private_tail_benchmark --parallel 2
+
+      - name: Run overflow cases
+        run: |
+          set -euo pipefail
+          mkdir -p "$TASK_DIR/result"
+          python3 private-research/scripts/run_exp180b_overflow_tail_benchmark.py             --binary "$TASK_DIR/build/exp180_private_tail_benchmark"             --out-dir "$TASK_DIR/result" --reps 3 --warmup 1             | tee "$TASK_DIR/result/driver.log"
+
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: exp180b-overflow-tail-${{ github.run_id }}
+          path: |
+            ${{ env.TASK_DIR }}/result/summary.json
+            ${{ env.TASK_DIR }}/result/driver.log
+          retention-days: 3
+          if-no-files-found: error
