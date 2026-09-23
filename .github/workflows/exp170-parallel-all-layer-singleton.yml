@@ -1,0 +1,185 @@
+name: exp170-parallel-all-layer-singleton
+
+on:
+  push:
+    paths:
+      - '.github/workflows/exp170-parallel-all-layer-singleton.yml'
+
+permissions:
+  contents: read
+
+env:
+  TDA_COMMIT: bb29c348913ab34f185c133ca042ba7164fc4925
+  TOKENIZERS_PARALLELISM: 'false'
+  HF_HUB_DISABLE_TELEMETRY: '1'
+  PYTHONDONTWRITEBYTECODE: '1'
+
+jobs:
+  capture-train:
+    strategy:
+      fail-fast: false
+      matrix:
+        role: [fit, cal, build, select]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 35
+    env:
+      OMP_NUM_THREADS: '4'
+      MKL_NUM_THREADS: '4'
+      OPENBLAS_NUM_THREADS: '1'
+    steps:
+      - name: Checkout private source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: hubugui1111-lab/tda-ppml-research
+          ref: ${{ env.TDA_COMMIT }}
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          path: private-research
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Install
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/python" -m pip install --disable-pip-version-check             torch==2.8.0+cpu --index-url https://download.pytorch.org/whl/cpu
+          "$RUNNER_TEMP/venv/bin/python" -m pip install --disable-pip-version-check             numpy==2.1.3 transformers==4.56.2 tokenizers==0.22.0             huggingface-hub==0.34.4 datasets==3.6.0 pyarrow==21.0.0 safetensors==0.6.2
+
+      - name: Capture role
+        run: |
+          mkdir -p "$RUNNER_TEMP/capture"
+          "$RUNNER_TEMP/venv/bin/python" private-research/experiments/170_parallel_capture_role.py             --role "${{ matrix.role }}" --batch-size 32             --out-dir "$RUNNER_TEMP/capture"
+
+      - name: Upload role
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: exp170-${{ matrix.role }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/capture/
+          retention-days: 3
+          compression-level: 1
+          if-no-files-found: error
+
+  freeze:
+    needs: capture-train
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout private source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: hubugui1111-lab/tda-ppml-research
+          ref: ${{ env.TDA_COMMIT }}
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          path: private-research
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Download captures
+        uses: actions/download-artifact@v4
+        with:
+          pattern: exp170-*-${{ github.run_id }}
+          path: ${{ runner.temp }}/captures
+          merge-multiple: true
+
+      - name: Install analysis deps
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/python" -m pip install --disable-pip-version-check             torch==2.8.0+cpu --index-url https://download.pytorch.org/whl/cpu
+          "$RUNNER_TEMP/venv/bin/python" -m pip install --disable-pip-version-check             numpy==2.1.3 transformers==4.56.2 tokenizers==0.22.0             huggingface-hub==0.34.4 datasets==3.6.0 pyarrow==21.0.0 safetensors==0.6.2
+
+      - name: Freeze policies
+        run: |
+          mkdir -p "$RUNNER_TEMP/frozen"
+          "$RUNNER_TEMP/venv/bin/python" private-research/experiments/170_freeze_all_layer_singleton.py             --input-dir "$RUNNER_TEMP/captures"             --out-dir "$RUNNER_TEMP/frozen"             --min-leaf 16
+
+      - name: Upload frozen policies
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: exp170-frozen-${{ github.run_id }}
+          path: ${{ runner.temp }}/frozen/
+          retention-days: 3
+          compression-level: 1
+          if-no-files-found: error
+
+  capture-test:
+    needs: freeze
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    env:
+      OMP_NUM_THREADS: '4'
+      MKL_NUM_THREADS: '4'
+      OPENBLAS_NUM_THREADS: '1'
+    steps:
+      - name: Checkout private source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: hubugui1111-lab/tda-ppml-research
+          ref: ${{ env.TDA_COMMIT }}
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          path: private-research
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Install
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/python" -m pip install --disable-pip-version-check             torch==2.8.0+cpu --index-url https://download.pytorch.org/whl/cpu
+          "$RUNNER_TEMP/venv/bin/python" -m pip install --disable-pip-version-check             numpy==2.1.3 transformers==4.56.2 tokenizers==0.22.0             huggingface-hub==0.34.4 datasets==3.6.0 pyarrow==21.0.0 safetensors==0.6.2
+
+      - name: Capture TEST after freeze
+        run: |
+          mkdir -p "$RUNNER_TEMP/test"
+          "$RUNNER_TEMP/venv/bin/python" private-research/experiments/170_parallel_capture_role.py             --role test --batch-size 32             --out-dir "$RUNNER_TEMP/test"
+
+      - name: Upload TEST
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: exp170-test-${{ github.run_id }}
+          path: ${{ runner.temp }}/test/
+          retention-days: 3
+          compression-level: 1
+          if-no-files-found: error
+
+  evaluate:
+    needs: [freeze, capture-test]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout private source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: hubugui1111-lab/tda-ppml-research
+          ref: ${{ env.TDA_COMMIT }}
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          path: private-research
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Download frozen
+        uses: actions/download-artifact@v4
+        with:
+          name: exp170-frozen-${{ github.run_id }}
+          path: ${{ runner.temp }}/frozen
+
+      - name: Download test
+        uses: actions/download-artifact@v4
+        with:
+          name: exp170-test-${{ github.run_id }}
+          path: ${{ runner.temp }}/test
+
+      - name: Install analysis deps
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/python" -m pip install --disable-pip-version-check             torch==2.8.0+cpu --index-url https://download.pytorch.org/whl/cpu
+          "$RUNNER_TEMP/venv/bin/python" -m pip install --disable-pip-version-check             numpy==2.1.3 transformers==4.56.2 tokenizers==0.22.0             huggingface-hub==0.34.4 datasets==3.6.0 pyarrow==21.0.0 safetensors==0.6.2
+
+      - name: Evaluate
+        run: |
+          mkdir -p "$RUNNER_TEMP/result"
+          "$RUNNER_TEMP/venv/bin/python" private-research/experiments/170_evaluate_all_layer_singleton.py             --frozen "$RUNNER_TEMP/frozen/frozen.pkl"             --test-values "$RUNNER_TEMP/test/test_values.npy"             --test-meta "$RUNNER_TEMP/test/test_meta.json"             --out "$RUNNER_TEMP/result/summary.json" | tee "$RUNNER_TEMP/result/driver.log"
+
+      - name: Upload result
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: exp170-result-${{ github.run_id }}
+          path: ${{ runner.temp }}/result/
+          retention-days: 3
+          if-no-files-found: error
