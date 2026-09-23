@@ -1,0 +1,78 @@
+name: exp182-fixed-leaf-unresolved-support
+
+on:
+  push:
+    paths:
+      - '.github/workflows/exp182-fixed-leaf-unresolved-support.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  exp182:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    env:
+      TDA_COMMIT: 2da2bf48c5aecbc9c8615db44ea965968c2e53d8
+      PYTHONDONTWRITEBYTECODE: '1'
+      OMP_NUM_THREADS: '2'
+      MKL_NUM_THREADS: '2'
+      OPENBLAS_NUM_THREADS: '1'
+    steps:
+      - name: Checkout private source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: hubugui1111-lab/tda-ppml-research
+          ref: ${{ env.TDA_COMMIT }}
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          path: private-research
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Download Exp170 frozen
+        uses: actions/download-artifact@v4
+        with:
+          name: exp170-frozen-35886052689
+          path: exp170/frozen
+          github-token: ${{ github.token }}
+          repository: hubugui1111-lab/public
+          run-id: 35886052689
+
+      - name: Download Exp170 SELECT
+        uses: actions/download-artifact@v4
+        with:
+          name: exp170-select-35886052689
+          path: exp170/select
+          github-token: ${{ github.token }}
+          repository: hubugui1111-lab/public
+          run-id: 35886052689
+
+      - name: Download Exp170 TEST
+        uses: actions/download-artifact@v4
+        with:
+          name: exp170-test-35886052689
+          path: exp170/test
+          github-token: ${{ github.token }}
+          repository: hubugui1111-lab/public
+          run-id: 35886052689
+
+      - name: Install
+        run: |
+          python3 -m venv venv
+          venv/bin/pip install --disable-pip-version-check numpy==2.1.3
+
+      - name: Run
+        run: |
+          set -euo pipefail
+          mkdir -p result
+          venv/bin/python private-research/experiments/182_fixed_leaf_unresolved_support.py             --frozen exp170/frozen/frozen.pkl             --select-values exp170/select/select_values.npy             --test-values exp170/test/test_values.npy             --out result/summary.json | tee result/driver.log
+
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: exp182-fixed-support-${{ github.run_id }}
+          path: result/
+          retention-days: 3
+          if-no-files-found: error
