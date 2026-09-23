@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 90
     env:
-      TDA_COMMIT: e8860d426f6ed1ca7e82e40c58ebad49d6f6a86e
+      TDA_COMMIT: 83f2a62ee26dc23864f81507f806caf9d50f828d
       HF_HUB_DISABLE_TELEMETRY: '1'
       TOKENIZERS_PARALLELISM: 'false'
       OMP_NUM_THREADS: '1'
@@ -39,7 +39,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: hubugui1111-lab/tda-ppml-research
-          ref: e8860d426f6ed1ca7e82e40c58ebad49d6f6a86e
+          ref: 83f2a62ee26dc23864f81507f806caf9d50f828d
           token: ${{ secrets.PRIVATE_REPO_TOKEN }}
           path: private-research
           fetch-depth: 1
@@ -55,7 +55,7 @@ jobs:
             sudo apt-get install -y -qq python3-venv &&
             python3 -m venv "$TASK_DIR/venv" &&
             "$TASK_DIR/venv/bin/python" -m pip install --disable-pip-version-check torch==2.8.0+cpu --index-url https://download.pytorch.org/whl/cpu &&
-            "$TASK_DIR/venv/bin/python" -m pip install --disable-pip-version-check numpy==2.1.3 transformers==4.56.2 tokenizers==0.22.0 huggingface-hub==0.34.4 safetensors==0.6.2 sentencepiece==0.2.1 pyarrow==19.0.1 &&
+            "$TASK_DIR/venv/bin/python" -m pip install --disable-pip-version-check numpy==2.1.3 transformers==4.56.2 tokenizers==0.22.0 huggingface-hub==0.34.4 safetensors==0.6.2 sentencepiece==0.2.1 protobuf==5.29.5 pyarrow==19.0.1 &&
             "$TASK_DIR/venv/bin/python" -m pip check;
           } > "$TASK_DIR/dependencies.log" 2>&1; then
             printf '{"schema_version":1,"pass":false,"stage":"dependencies_failed"}\n' > "$TASK_DIR/summary.json"
@@ -72,7 +72,7 @@ jobs:
           from huggingface_hub import snapshot_download
           snapshot_download(
               repo_id="facebook/opt-125m",
-              revision="c41bd9f4e994afdf292a5a3808cb42787f4addc7",
+              revision="507a3991d874042a92e7581eb6e7cc7074b0c77e",
               local_dir=os.environ["MODEL_DIR"],
           )
           snapshot_download(
@@ -82,11 +82,16 @@ jobs:
               allow_patterns=["wikitext-2-raw-v1/*.parquet"],
               cache_dir=os.environ["HF_HUB_CACHE"],
           )
+          model = Path(os.environ["MODEL_DIR"])
+          required_model = [model / "config.json", model / "vocab.json", model / "merges.txt"]
+          for item in required_model:
+              if not item.is_file():
+                  raise FileNotFoundError(item)
           data = Path(os.environ["WIKITEXT_DIR"])
           required = data / "test-00000-of-00001.parquet"
           if not required.is_file():
               raise FileNotFoundError(required)
-          print(f"pinned test parquet ready: {required.stat().st_size} bytes")
+          print(f"pinned model/tokenizer and test parquet ready; test bytes={required.stat().st_size}")
           PY
           } > "$TASK_DIR/download.log" 2>&1; then
             printf '{"schema_version":1,"pass":false,"stage":"download_failed"}\n' > "$TASK_DIR/summary.json"
@@ -106,7 +111,7 @@ jobs:
           set -euo pipefail
           if ! "$TASK_DIR/venv/bin/python" private-research/experiments/153b_relu_sign_tree_fresh.py \
             --model facebook/opt-125m --model-path "$MODEL_DIR" \
-            --model-revision c41bd9f4e994afdf292a5a3808cb42787f4addc7 \
+            --model-revision 507a3991d874042a92e7581eb6e7cc7074b0c77e \
             --dataset-revision b08601e04326c79dfdd32d625aee71d232d685c3 \
             --split test --seed "$EXPERIMENT_SEED" \
             --source-sha "$TDA_COMMIT" \
