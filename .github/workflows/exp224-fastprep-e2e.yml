@@ -1,0 +1,188 @@
+name: Exp224 fast-preprocessed E2E
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - 'scripts/patch_secure_join_exp224.py'
+      - 'experiments/exp224_xor_corr_to_additive.cpp'
+      - 'experiments/exp224_fastprep_e2e.cpp'
+      - '.github/workflows/exp224-fastprep-e2e.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  exp224:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/results"
+          mkdir -p "$GITHUB_WORKSPACE/prep"
+
+      - name: Install deps
+        run: sudo apt-get update -qq && sudo apt-get install -y libmpfr-dev libgmp-dev cmake g++ make git
+
+      - name: Build Secure-Join fast permutation preprocessor
+        run: |
+          git clone --depth 1 https://github.com/ladnir/secure-join.git /tmp/secure-join
+          python3 scripts/patch_secure_join_exp224.py /tmp/secure-join
+          cd /tmp/secure-join
+          python3 build.py -DENABLE_MOCK_OT=true -DENABLE_RELIC=false -DENABLE_SODIUM=false -DCMAKE_BUILD_TYPE=Release
+
+      - name: Generate real XOR permutation correlations
+        working-directory: /tmp/secure-join
+        run: |
+          ./out/build/linux/frontend/secJoinfrontend -bench -Exp224             -n 3072 -B 320 -mock 0 -nt 2 -b 16             -out0 "$GITHUB_WORKSPACE/prep/exp224_xor_p0.bin"             -out1 "$GITHUB_WORKSPACE/prep/exp224_xor_p1.bin"             | tee "$GITHUB_WORKSPACE/results/exp224_xor_prep.log"
+          test -s "$GITHUB_WORKSPACE/prep/exp224_xor_p0.bin"
+          test -s "$GITHUB_WORKSPACE/prep/exp224_xor_p1.bin"
+
+      - name: Build and install SEAL 4.1.2
+        run: |
+          git clone --depth 1 --branch v4.1.2 https://github.com/microsoft/SEAL.git /tmp/SEAL
+          cmake -S /tmp/SEAL -B /tmp/SEAL/build -DSEAL_BUILD_TESTS=OFF -DSEAL_BUILD_EXAMPLES=OFF -DCMAKE_BUILD_TYPE=Release
+          cmake --build /tmp/SEAL/build -j2
+          sudo cmake --install /tmp/SEAL/build
+
+      - name: Clone EzPC SCI
+        run: git clone --depth 1 https://github.com/mpc-msri/EzPC.git /tmp/EzPC
+
+      - name: Install Exp224 sources
+        run: |
+          mkdir -p /tmp/EzPC/SCI/tests/exp224
+          cp experiments/exp224_xor_corr_to_additive.cpp /tmp/EzPC/SCI/tests/exp224/
+          cp experiments/exp224_fastprep_e2e.cpp /tmp/EzPC/SCI/tests/exp224/
+          cp experiments/exp198_leaf/prepared_shared_leaf_lookup16.h /tmp/EzPC/SCI/tests/exp224/
+          cp experiments/exp196_orcompact/shared_controls.h /tmp/EzPC/SCI/tests/exp224/
+          cp experiments/exp196_orcompact/private_gates.h /tmp/EzPC/SCI/tests/exp224/
+          cp experiments/exp196_orcompact/orcompact_scatter.h /tmp/EzPC/SCI/tests/exp224/
+          cp experiments/exp196_orcompact/orcompact_plan.cpp /tmp/EzPC/SCI/tests/exp224/
+          printf '\n' >> /tmp/EzPC/SCI/tests/CMakeLists.txt
+          cat >> /tmp/EzPC/SCI/tests/CMakeLists.txt <<'EOF'
+          find_package(SEAL 4.1 REQUIRED)
+          add_executable(exp224-x2a exp224/exp224_xor_corr_to_additive.cpp)
+          target_link_libraries(exp224-x2a SCI-OT)
+          add_executable(exp224-full-e2e
+            exp224/exp224_fastprep_e2e.cpp
+            exp224/orcompact_plan.cpp)
+          target_include_directories(exp224-full-e2e PRIVATE exp224)
+          target_link_libraries(exp224-full-e2e SCI-OT SCI-GC SEAL::seal)
+          EOF
+
+      - name: Initialize and patch legacy SEAL
+        run: |
+          git -C /tmp/EzPC submodule update --init --depth 1 SCI/extern/SEAL
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path("/tmp/EzPC/SCI/extern/SEAL/native/src/seal/util/locks.h")
+          s=p.read_text()
+          if "#include <mutex>" not in s:
+              s=s.replace("#pragma once","#pragma once\n#include <mutex>")
+              p.write_text(s)
+          PY
+
+      - name: Configure SCI
+        working-directory: /tmp/EzPC/SCI
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON -DBUILD_NETWORKS=OFF
+
+      - name: Build Exp224
+        working-directory: /tmp/EzPC/SCI
+        run: cmake --build build --target exp224-x2a exp224-full-e2e -j2
+
+      - name: Convert XOR correlations to additive
+        working-directory: /tmp/EzPC/SCI
+        shell: bash
+        run: |
+          set -uo pipefail
+          ./build/bin/exp224-x2a r=1 p=20350             in="$GITHUB_WORKSPACE/prep/exp224_xor_p0.bin"             out="$GITHUB_WORKSPACE/prep/exp224_add_p0.bin"             > "$GITHUB_WORKSPACE/results/exp224_x2a_P1.log" 2>&1 &
+          P1=$!
+          sleep 0.2
+          ./build/bin/exp224-x2a r=2 p=20350 ip=127.0.0.1             in="$GITHUB_WORKSPACE/prep/exp224_xor_p1.bin"             out="$GITHUB_WORKSPACE/prep/exp224_add_p1.bin"             > "$GITHUB_WORKSPACE/results/exp224_x2a_P2.log" 2>&1
+          C2=$?
+          wait "$P1"; C1=$?
+          cat "$GITHUB_WORKSPACE/results/exp224_x2a_P1.log"
+          cat "$GITHUB_WORKSPACE/results/exp224_x2a_P2.log"
+          test -s "$GITHUB_WORKSPACE/prep/exp224_add_p0.bin"
+          test -s "$GITHUB_WORKSPACE/prep/exp224_add_p1.bin"
+          if [ "$C1" -ne 0 ] || [ "$C2" -ne 0 ]; then exit 3; fi
+
+      - name: Run two-party Exp224 E2E
+        working-directory: /tmp/EzPC/SCI
+        shell: bash
+        run: |
+          set -uo pipefail
+          ./build/bin/exp224-full-e2e r=1 p=20360             prep="$GITHUB_WORKSPACE/prep/exp224_add_p0.bin"             > "$GITHUB_WORKSPACE/results/exp224_P1.log" 2>&1 &
+          P1=$!
+          sleep 0.3
+          ./build/bin/exp224-full-e2e r=2 p=20360 ip=127.0.0.1             prep="$GITHUB_WORKSPACE/prep/exp224_add_p1.bin"             > "$GITHUB_WORKSPACE/results/exp224_P2.log" 2>&1
+          C2=$?
+          wait "$P1"; C1=$?
+          cat "$GITHUB_WORKSPACE/results/exp224_P1.log"
+          cat "$GITHUB_WORKSPACE/results/exp224_P2.log"
+          if [ "$C1" -ne 0 ] || [ "$C2" -ne 0 ]; then exit 3; fi
+
+      - name: Parse
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import json,pathlib,re
+          root=pathlib.Path("results")
+          xor=None;x2a=[];rows=[];phases=[]
+          for line in (root/"exp224_xor_prep.log").read_text().splitlines():
+              if line.startswith("EXP224_XOR_PREP_RESULT "):
+                  xor={}
+                  for tok in line[len("EXP224_XOR_PREP_RESULT "):].split():
+                      k,v=tok.split("=",1)
+                      try:xor[k]=float(v) if "." in v else int(v)
+                      except:xor[k]=v
+          for p in sorted(root.glob("exp224_x2a_P*.log")):
+              for line in p.read_text().splitlines():
+                  if line.startswith("EXP224_X2A_RESULT "):
+                      d={"source":p.name}
+                      for tok in line[len("EXP224_X2A_RESULT "):].split():
+                          k,v=tok.split("=",1)
+                          try:d[k]=float(v) if "." in v else int(v)
+                          except:d[k]=v
+                      x2a.append(d)
+          for p in sorted(root.glob("exp224_P*.log")):
+              for line in p.read_text().splitlines():
+                  if line.startswith("EXP224_PHASE "):
+                      d={"source":p.name}
+                      for tok in line[len("EXP224_PHASE "):].split():
+                          k,v=tok.split("=",1)
+                          try:d[k]=float(v) if "." in v else int(v)
+                          except:d[k]=v
+                      phases.append(d)
+                  elif line.startswith("EXP224_RESULT "):
+                      d={"source":p.name}
+                      for tok in line[len("EXP224_RESULT "):].split():
+                          k,v=tok.split("=",1)
+                          try:d[k]=float(v) if "." in v else int(v)
+                          except:d[k]=v
+                      rows.append(d)
+          if xor is None: raise SystemExit("missing xor prep result")
+          if len(x2a)!=2 or any(r.get("mismatches",1) for r in x2a): raise SystemExit("x2a failure")
+          if len(rows)!=2 or any(r.get("mismatches",1) for r in rows): raise SystemExit("e2e failure")
+          prep_ms=xor["preprocess_ms"]+max(r["ms"] for r in x2a)
+          report={
+            "experiment":"Exp224 fast-preprocessed E2E",
+            "xor_pcg":xor,
+            "x2a":x2a,
+            "fast_shuffle_preprocess_ms_composed":prep_ms,
+            "rows":rows,
+            "phases":phases,
+          }
+          pathlib.Path("results/exp224_full_report.json").write_text(json.dumps(report,indent=2))
+          print(json.dumps(report,indent=2))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: exp224-fastprep-e2e
+          path: results/exp224_*
+          if-no-files-found: error
