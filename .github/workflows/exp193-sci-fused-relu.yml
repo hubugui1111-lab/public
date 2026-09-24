@@ -28,10 +28,7 @@ jobs:
       - name: Install Exp193 source
         run: |
           cp experiments/exp193_sci_relu_ring.cpp /tmp/EzPC/SCI/tests/exp193_sci_relu_ring.cpp
-          cat >> /tmp/EzPC/SCI/tests/CMakeLists.txt <<'EOF'
-          add_executable(exp193-sci-relu exp193_sci_relu_ring.cpp)
-          target_link_libraries(exp193-sci-relu SCI-OT)
-          EOF
+          printf '\nadd_executable(exp193-sci-relu exp193_sci_relu_ring.cpp)\ntarget_link_libraries(exp193-sci-relu SCI-OT)\n' >> /tmp/EzPC/SCI/tests/CMakeLists.txt
       - name: Build SCI Exp193
         working-directory: /tmp/EzPC/SCI
         run: |
