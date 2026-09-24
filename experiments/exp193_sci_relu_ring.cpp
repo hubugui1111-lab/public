@@ -1,5 +1,6 @@
 #include "NonLinear/relu-ring.h"
 #include "utils/io_pack.h"
+#include "utils/emp-tool.h"
 #include "OT/emp-ot.h"
 #include <chrono>
 #include <cstdint>
