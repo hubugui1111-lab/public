@@ -98,6 +98,10 @@ void reverse_compact(FPMath& math,const std::vector<SortStage>& stages,std::vect
     for(int c=0;c<C;++c){ wires[st.a[c]]=na.data[c]; wires[st.b[c]]=nb.data[c]; }
   }
 }
+FixArray native_relu(FPMath& math,const FixArray& x){
+  auto sign=math.fix->GE(x,uint64_t(0));
+  return math.fix->if_else(sign,x,uint64_t(0));
+}
 void print_phase(const char* name,int party,const Phase&p){
   std::cout<<"EXP195_PHASE party="<<party<<" name="<<name<<" bytes="<<p.bytes<<" rounds="<<p.rounds<<" ms="<<p.ms<<"\n";
 }
@@ -184,7 +188,7 @@ int main(int argc,char**argv){
     std::vector<uint64_t> tail_compact(PADN,0);
     ph_tail=measure(io,[&]{
       FixArray tx(party,CAP,true,ELL,0); for(int i=0;i<CAP;++i)tx.data[i]=wires[i];
-      auto s=math.fix->GE(tx,uint64_t(0)); auto y=math.fix->if_else(s,tx,uint64_t(0));
+      auto y=native_relu(math,tx);
       for(int i=0;i<CAP;++i) tail_compact[i]=y.data[i];
     });
     ph_scatter=measure(io,[&]{reverse_compact(math,stages,tail_compact);});
@@ -196,7 +200,7 @@ int main(int argc,char**argv){
     });
   }else{
     ph_overflow=measure(io,[&]{
-      auto s=math.fix->GE(z,uint64_t(0)); final_out=math.fix->if_else(s,z,uint64_t(0));
+      final_out=native_relu(math,z);
     });
   }
 
@@ -206,7 +210,7 @@ int main(int argc,char**argv){
   const double total_ms=std::chrono::duration<double,std::milli>(total_t1-total_t0).count();
 
   FixArray baseline;
-  auto ph_full=measure(io,[&]{auto s=math.fix->GE(z,uint64_t(0));baseline=math.fix->if_else(s,z,uint64_t(0));});
+  auto ph_full=measure(io,[&]{baseline=native_relu(math,z);});
 
   auto pub_final=math.fix->output(PUBLIC,final_out);
   auto pub_full=math.fix->output(PUBLIC,baseline);
