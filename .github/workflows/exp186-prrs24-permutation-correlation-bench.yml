@@ -60,8 +60,11 @@ jobs:
         run: |
           set -euo pipefail
           cd "$TASK_DIR/mpc4j"
-          mvn -q -pl mpc4j-s2pc-aby -am             -Dtest=Exp186Prrs24RosnBenchTest             -DfailIfNoTests=false             test 2>&1 | tee "$TASK_DIR/result/raw.log"
-          grep 'EXP186_RESULT' "$TASK_DIR/result/raw.log" | tee "$TASK_DIR/result/results.txt"
+          mvn -pl mpc4j-s2pc-aby -am -Dtest=Exp186Prrs24RosnBenchTest -DfailIfNoTests=false -Dsurefire.useFile=false test 2>&1 | tee "$TASK_DIR/result/raw.log"
+          {
+            grep 'EXP186_RESULT' "$TASK_DIR/result/raw.log" || true
+            grep -R 'EXP186_RESULT' mpc4j-s2pc-aby/target/surefire-reports 2>/dev/null || true
+          } | sed -E 's#^.*EXP186_RESULT #EXP186_RESULT #' | sort -u | tee "$TASK_DIR/result/results.txt"
           test -s "$TASK_DIR/result/results.txt"
 
       - name: Parse summary
