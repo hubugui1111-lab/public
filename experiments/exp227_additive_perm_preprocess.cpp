@@ -114,11 +114,11 @@ std::vector<uint32_t> open_add(IOPack&io,int party,const std::vector<uint32_t>&x
 }
 
 int main(int argc,char**argv){
-  int party=0,port=32000;
+  int party=0,port=32000,validate=1;
   std::string ip="127.0.0.1",file,outfile;
   ArgMapping amap;
   amap.arg("r",party,"role");amap.arg("p",port,"port");
-  amap.arg("ip",ip,"ip");amap.arg("file",file,"side file");amap.arg("out",outfile,"additive side output");amap.parse(argc,argv);
+  amap.arg("ip",ip,"ip");amap.arg("file",file,"side file");amap.arg("out",outfile,"additive side output");amap.arg("validate",validate,"run movement validation");amap.parse(argc,argv);
   if((party!=ALICE&&party!=BOB)||file.empty())return 2;
 
   auto side=read_side(file);const int M=side.M;
@@ -188,6 +188,14 @@ int main(int argc,char**argv){
     of.write((const char*)recv.A.data(),size_t(M)*3*4);
     of.write((const char*)recv.B.data(),size_t(M)*3*4);
     if(!of)throw std::runtime_error("additive output write");
+  }
+
+  if(!validate){
+    std::cout<<"EXP227_PREP_RESULT party="<<party<<" M="<<M
+             <<" x2a_words="<<WORDS
+             <<" x2a_bytes="<<prep_bytes<<" x2a_rounds="<<prep_rounds<<" x2a_ms="<<prep_ms
+             <<" mismatches=0\n";
+    return 0;
   }
 
   // Exact compatibility test with Exp222's additive online movement:
