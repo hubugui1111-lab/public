@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 3.21)
+project(exp190 LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 20)
+find_package(emp-sh2pc 1.0 REQUIRED)
+add_executable(exp190 exp190_gc_dummy_padding.cpp)
+target_link_libraries(exp190 PRIVATE emp-sh2pc::emp-sh2pc)
