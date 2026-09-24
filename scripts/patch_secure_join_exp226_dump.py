@@ -64,7 +64,7 @@ if "void Exp226_dump_benchmark" not in s:
         genSock[0].setExecutor(pool0);corSock[0].setExecutor(pool0);
         genSock[1].setExecutor(pool1);corSock[1].setExecutor(pool1);
 
-        PRNG prng0(oc::ZeroBlock),prng1(oc::OneBlock);
+        PRNG prng0(oc::sysRandomSeed()),prng1(oc::sysRandomSeed());
         CorGenerator g0,g1;
         g0.init(corSock[0].fork(),prng0,0,nt,batch,mock);
         g1.init(corSock[1].fork(),prng1,1,nt,batch,mock);
