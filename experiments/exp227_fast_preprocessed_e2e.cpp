@@ -505,7 +505,8 @@ std::vector<uint64_t> private_probe_gather64(
 // A*d_A+B locally.  BOB sees only V=R(A*d+B), returns a fresh XOR-masked
 // sign bit, and ALICE removes R.  Public contract: |d| < zeta.
 BoolArray kangaroo_ge0_probe64(IOPack&io,OTPack&ot,int party,PRG128&rng,
-                               const std::vector<uint64_t>&dshare){
+                               const std::vector<uint64_t>&dshare,
+                               int* regression_wrap_failures=nullptr){
   const int n=int(dshare.size());
   if(n!=INTERNAL)throw std::runtime_error("probe64 size");
   constexpr int BITS=64;
@@ -521,6 +522,14 @@ BoolArray kangaroo_ge0_probe64(IOPack&io,OTPack&ot,int party,PRG128&rng,
       const uint64_t aa=2+(raw[3*i]%(PROBE_ZETA-2));   // 2 .. zeta-1
       const uint64_t bb=1+(raw[3*i+1]%(aa-1));         // 1 .. A-1
       const bool neg=(raw[3*i+2]&1U)!=0;
+      if(regression_wrap_failures){
+        if(!(PROBE_ZETA>aa&&aa>bb&&bb>0))++*regression_wrap_failures;
+        for(const int64_t edge:{-int64_t(PROBE_ZETA-1),int64_t(PROBE_ZETA-1)}){
+          __int128 v=__int128(aa)*edge+__int128(bb);
+          if(v<0)v=-v;
+          if(v>=(__int128(1)<<63))++*regression_wrap_failures;
+        }
+      }
       flip[i]=uint8_t(neg);
       alpha[i]=neg?(0ULL-aa):aa;
       beta[i]=neg?(0ULL-bb):bb;
@@ -822,9 +831,9 @@ int main(int argc,char**argv){
   auto ph_probe_gather=measure(io,[&]{
     probe_d64=private_probe_gather64(io,ot,party,rng,z64_local,probe_index);
   });
-  BoolArray probe_sign;
+  BoolArray probe_sign;int probe_wrap_failures=0;
   auto ph_probe=measure(io,[&]{
-    probe_sign=kangaroo_ge0_probe64(io,ot,party,rng,probe_d64);
+    probe_sign=kangaroo_ge0_probe64(io,ot,party,rng,probe_d64,&probe_wrap_failures);
   });
   uint8_t masked_leaf=0;
   auto ph_route=measure(io,[&]{masked_leaf=prepared_route->run(probe_sign,leaf_mask);});
@@ -979,7 +988,29 @@ int main(int argc,char**argv){
   FixArray baseline;auto ph_full=measure(io,[&]{baseline=native_relu(math,z);});
   auto pub_final=math.fix->output(PUBLIC,final_out);auto pub_full=math.fix->output(PUBLIC,baseline);
   auto pub_cert=math.bool_op->output(PUBLIC,cert);
-  int mismatches=0,cert_count=0,expected_cert=0;
+
+  // Dedicated test-only 15-probe regression, deliberately after all timers.
+  // It opens only the synthetic harness values and verifies the exact private
+  // gather, the 64-bit blinded comparison bit, and the final routed leaf.
+  std::vector<uint64_t>probe_peer(INTERNAL),probe_open(INTERNAL);
+  if(party==ALICE){
+    io.io->send_data(probe_d64.data(),INTERNAL*sizeof(uint64_t));io.io->flush();
+    io.io->recv_data(probe_peer.data(),INTERNAL*sizeof(uint64_t));
+  }else{
+    io.io->recv_data(probe_peer.data(),INTERNAL*sizeof(uint64_t));
+    io.io->send_data(probe_d64.data(),INTERNAL*sizeof(uint64_t));io.io->flush();
+  }
+  for(int j=0;j<INTERNAL;++j)probe_open[j]=probe_d64[j]+probe_peer[j];
+  auto pub_probe_sign=math.bool_op->output(PUBLIC,probe_sign);
+  int probe_gather_mismatches=0,probe_compare_mismatches=0;
+  if(party==ALICE)for(int j=0;j<INTERNAL;++j){
+    const int64_t clear=dec_signed(z_clear[probe_index[j]]);
+    probe_gather_mismatches+=int(probe_open[j]!=uint64_t(clear));
+    probe_compare_mismatches+=int(bool(pub_probe_sign.data[j])!=(clear>=0));
+  }
+
+  int mismatches=probe_gather_mismatches+probe_compare_mismatches+probe_wrap_failures;
+  int cert_count=0,expected_cert=0;
   for(int i=0;i<N;++i){
     cert_count+=pub_cert.data[i];mismatches+=((pub_final.data[i]&MASK)!=(pub_full.data[i]&MASK));
     if(party==ALICE){
@@ -988,13 +1019,19 @@ int main(int argc,char**argv){
     }
   }
   // Test-only route check after the measured online region.
-  uint8_t opened_masked_leaf=0;
+  uint8_t opened_masked_leaf=0;int probe_route_mismatches=0;
   if(party==BOB){io.io->send_data(&masked_leaf,1);io.io->flush();}
   else{
     io.io->recv_data(&opened_masked_leaf,1);
-    mismatches+=int(((opened_masked_leaf^leaf_mask)&15)!=TARGET_LEAF);
+    probe_route_mismatches=int(((opened_masked_leaf^leaf_mask)&15)!=TARGET_LEAF);
+    mismatches+=probe_route_mismatches;
   }
   if(accepted)mismatches+=(opened_weight!=CAP);
+  std::cout<<"EXP227_PROBE15_REGRESSION party="<<party
+           <<" gather_mismatches="<<probe_gather_mismatches
+           <<" compare_mismatches="<<probe_compare_mismatches
+           <<" wrap_failures="<<probe_wrap_failures
+           <<" route_mismatches="<<probe_route_mismatches<<"\n";
 
   print_phase("probe15_private_ot_gather",party,ph_probe_gather);
   print_phase("probe15_kangaroo64",party,ph_probe);print_phase("masked_leaf_gc_route",party,ph_route);
