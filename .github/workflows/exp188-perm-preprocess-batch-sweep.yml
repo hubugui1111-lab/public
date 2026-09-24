@@ -1,0 +1,88 @@
+name: Exp188 permutation preprocessing batch sweep
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/exp188-perm-preprocess-batch-sweep.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  exp188:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare output
+        run: mkdir -p "$GITHUB_WORKSPACE/results"
+
+      - name: Clone maintained secure-join
+        run: git clone --depth 1 https://github.com/ladnir/secure-join.git /tmp/secure-join
+
+      - name: Patch Exp187 benchmark
+        run: python3 scripts/patch_secure_join_exp187.py /tmp/secure-join
+
+      - name: Build secure-join
+        working-directory: /tmp/secure-join
+        run: python3 build.py -DENABLE_MOCK_OT=true -DENABLE_RELIC=false -DENABLE_SODIUM=false -DCMAKE_BUILD_TYPE=Release
+
+      - name: Verify benchmark binary
+        working-directory: /tmp/secure-join
+        run: test -x ./out/build/linux/frontend/secJoinfrontend
+
+      - name: Sweep real correlation batch sizes
+        working-directory: /tmp/secure-join
+        shell: bash
+        run: |
+          set -euo pipefail
+          for b in 10 11 12 13 14 15 16; do
+            echo "=== batch_log2=$b ==="
+            ./out/build/linux/frontend/secJoinfrontend               -bench -Exp187 -n 3072 -B 320 -w 214 -mock 0 -nt 2 -b "$b"               | tee "$GITHUB_WORKSPACE/results/exp188_b${b}.log"
+          done
+
+      - name: Parse compact result
+        run: |
+          python3 - <<'PY'
+          import json, pathlib
+          rows=[]
+          for p in sorted(pathlib.Path("results").glob("exp188_b*.log")):
+              b=int(p.stem.split("_b")[-1])
+              for line in p.read_text().splitlines():
+                  if not line.startswith("EXP187_RESULT "):
+                      continue
+                  row={"batch_log2":b}
+                  for tok in line[len("EXP187_RESULT "):].split():
+                      k,v=tok.split("=",1)
+                      try:
+                          row[k]=float(v) if "." in v else int(v)
+                      except ValueError:
+                          row[k]=v
+                  rows.append(row)
+          if len(rows)!=7:
+              raise SystemExit(f"expected 7 rows, got {len(rows)}")
+          rows.sort(key=lambda x:x["batch_log2"])
+          best=min(rows,key=lambda x:x["preprocess_bytes"])
+          report={
+              "experiment":"Exp188 permutation correlation preprocessing batch sweep",
+              "protocol":"Exp187 fixed-weight secret shuffle; Exp170 semantics frozen",
+              "reference_old_tail_prepare_bytes_B320":2965506,
+              "reference_exp187_b16_preprocess_bytes":6014396,
+              "best_by_preprocess_bytes":best,
+              "rows":rows,
+          }
+          pathlib.Path("results/exp188_preprocess_batch_sweep.json").write_text(json.dumps(report,indent=2))
+          print(json.dumps(report,indent=2))
+          PY
+
+      - name: Upload Exp188 artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: exp188-permutation-preprocess-batch-sweep
+          path: |
+            results/exp188_b*.log
+            results/exp188_preprocess_batch_sweep.json
+          if-no-files-found: error
