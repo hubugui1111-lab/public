@@ -1,0 +1,60 @@
+name: Exp204 additive shuffle preprocessing
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - 'scripts/patch_secure_join_exp204.py'
+      - '.github/workflows/exp204-additive-preprocess.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  exp204:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare
+        run: mkdir -p "$GITHUB_WORKSPACE/results"
+      - name: Clone secure-join
+        run: git clone --depth 1 https://github.com/ladnir/secure-join.git /tmp/secure-join
+      - name: Patch Exp204
+        run: python3 scripts/patch_secure_join_exp204.py /tmp/secure-join
+      - name: Build
+        working-directory: /tmp/secure-join
+        run: python3 build.py -DENABLE_MOCK_OT=true -DENABLE_RELIC=false -DENABLE_SODIUM=false -DCMAKE_BUILD_TYPE=Release
+      - name: Verify
+        working-directory: /tmp/secure-join
+        run: test -x ./out/build/linux/frontend/secJoinfrontend
+      - name: Run real 9-byte preprocessing
+        working-directory: /tmp/secure-join
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./out/build/linux/frontend/secJoinfrontend -bench -Exp204 -n 3072 -B 320 -mock 0 -nt 2 -b 16             | tee "$GITHUB_WORKSPACE/results/exp204_real.log"
+      - name: Parse
+        run: |
+          python3 - <<'PY'
+          import json,pathlib
+          rows=[]
+          for line in pathlib.Path("results/exp204_real.log").read_text().splitlines():
+              if not line.startswith("EXP204_RESULT "): continue
+              d={}
+              for tok in line[len("EXP204_RESULT "):].split():
+                  k,v=tok.split("=",1)
+                  try:d[k]=float(v) if "." in v else int(v)
+                  except:d[k]=v
+              rows.append(d)
+          if len(rows)!=1: raise SystemExit(f"expected 1 result got {len(rows)}")
+          pathlib.Path("results/exp204_additive_preprocess.json").write_text(json.dumps(rows[0],indent=2))
+          print(json.dumps(rows[0],indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: exp204-additive-preprocess
+          path: results/exp204_*
+          if-no-files-found: error
