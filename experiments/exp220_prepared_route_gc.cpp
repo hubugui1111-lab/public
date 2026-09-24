@@ -18,12 +18,15 @@ struct PreparedRouteGC{
   PreparedRouteGC(FPMath&m,OTPack&o):math(m),ot(o){
     pe=setup_semi_honest<NetIO>(math.iopack->io_GC,math.party,128);
     auto* iknp=ot.iknp_straight;
-    if(math.party==ALICE)
-      static_cast<SemiHonestGen<NetIO>*>(pe)->setup_keys(iknp->k0,iknp->s);
-    else
-      static_cast<SemiHonestEva<NetIO>*>(pe)->setup_keys(iknp->k0,iknp->k1);
-    // Pre-fill the COT buffer before online input arrives.
-    pe->refill();
+    if(math.party==ALICE){
+      auto* gen=static_cast<SemiHonestGen<NetIO>*>(pe);
+      gen->setup_keys(iknp->k0,iknp->s);
+      gen->refill();
+    }else{
+      auto* eva=static_cast<SemiHonestEva<NetIO>*>(pe);
+      eva->setup_keys(iknp->k0,iknp->k1);
+      eva->refill();
+    }
     math.iopack->io_GC->flush();
   }
   ~PreparedRouteGC(){
