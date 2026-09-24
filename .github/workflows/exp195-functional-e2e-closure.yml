@@ -24,6 +24,7 @@ jobs:
       - name: Install source
         run: |
           cp experiments/exp195_functional_e2e_closure.cpp /tmp/EzPC/SCI/tests/exp195_functional_e2e_closure.cpp
+          printf '\n' >> /tmp/EzPC/SCI/tests/CMakeLists.txt
           cat >> /tmp/EzPC/SCI/tests/CMakeLists.txt <<'EOF'
           add_executable(exp195-functional-e2e exp195_functional_e2e_closure.cpp)
           target_link_libraries(exp195-functional-e2e SCI-OT)
