@@ -228,12 +228,12 @@ std::vector<uint32_t> apply_inverse(IOPack&io,int party,int ownerParty,
  const std::vector<uint32_t>&p,const CorrPair&corr,
  const std::vector<uint32_t>&in,int cols){
   std::vector<uint32_t> out(size_t(M)*cols),msg(size_t(M)*cols);
-  auto pinv=inv_perm(p);
   if(party!=ownerParty){
     for(size_t i=0;i<msg.size();++i)msg[i]=sub24(in[i],corr.recv.B[i]);
     io.io->send_data(msg.data(),int(msg.size()*4));io.io->flush();
     out=corr.recv.A;
   }else{
+    auto pinv=inv_perm(p);
     io.io->recv_data(msg.data(),int(msg.size()*4));
     for(int i=0;i<M;++i)for(int c=0;c<cols;++c){
       size_t d=size_t(i)*cols+c,s=size_t(pinv[i])*cols+c;
