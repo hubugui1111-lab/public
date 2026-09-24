@@ -61,7 +61,8 @@ if "void Exp187_shuffle_benchmark" not in s:
 			pg0.generate(genSock[0], prng0, Perm(M, prng0), p0) | macoro::start_on(pool0),
 			pg1.generate(genSock[1], prng1, Perm(M, prng1), p1) | macoro::start_on(pool1)
 		));
-		std::get<0>(prep).result(); std::get<1>(prep).result();\n		std::get<2>(prep).result(); std::get<3>(prep).result();
+		std::get<0>(prep).result(); std::get<1>(prep).result();
+		std::get<2>(prep).result(); std::get<3>(prep).result();
 		auto prepEnd = std::chrono::steady_clock::now();
 		u64 prepBytes = genSock[0].bytesSent() + genSock[0].bytesReceived()
 			+ corSock[0].bytesSent() + corSock[0].bytesReceived();
@@ -93,7 +94,8 @@ if "void Exp187_shuffle_benchmark" not in s:
 			onlineSock[0].send(fs0), onlineSock[0].recv(peer0),
 			onlineSock[1].send(fs1), onlineSock[1].recv(peer1)
 		));
-		std::get<0>(opened).result(); std::get<1>(opened).result();\n		std::get<2>(opened).result(); std::get<3>(opened).result();
+		std::get<0>(opened).result(); std::get<1>(opened).result();
+		std::get<2>(opened).result(); std::get<3>(opened).result();
 		fs0 ^= peer0; fs1 ^= peer1;
 		if (fs0 != fs1 || fs0.hammingWeight() != B) throw RTE_LOC;
 
