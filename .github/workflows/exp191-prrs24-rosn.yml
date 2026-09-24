@@ -35,6 +35,7 @@ jobs:
         run: |
           set -euo pipefail
           mvn -q -pl mpc4j-s2pc-aby -am \
+            -Dmaven.test.skip=false \
             -Dtest=Exp191Prrs24RosnBenchTest \
             -Dsurefire.failIfNoSpecifiedTests=false \
             -Dsurefire.useFile=false \
