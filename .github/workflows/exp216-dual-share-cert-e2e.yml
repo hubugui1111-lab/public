@@ -1,0 +1,120 @@
+name: Exp216 production E2E
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - 'experiments/exp216_dual_share_cert_e2e.cpp'
+      - 'experiments/exp198_leaf/prepared_shared_leaf_lookup16.h'
+      - 'experiments/exp196_orcompact/shared_controls.h'
+      - 'experiments/exp196_orcompact/private_gates.h'
+      - 'experiments/exp196_orcompact/orcompact_scatter.h'
+      - '.github/workflows/exp216-dual-share-cert-e2e.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  exp216:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare
+        run: mkdir -p "$GITHUB_WORKSPACE/results"
+      - name: Install deps
+        run: sudo apt-get update -qq && sudo apt-get install -y libmpfr-dev libgmp-dev cmake g++ make git
+      - name: Build and install SEAL 4.1.2
+        run: |
+          git clone --depth 1 --branch v4.1.2 https://github.com/microsoft/SEAL.git /tmp/SEAL
+          cmake -S /tmp/SEAL -B /tmp/SEAL/build -DSEAL_BUILD_TESTS=OFF -DSEAL_BUILD_EXAMPLES=OFF -DCMAKE_BUILD_TYPE=Release
+          cmake --build /tmp/SEAL/build -j2
+          sudo cmake --install /tmp/SEAL/build
+      - name: Clone EzPC SCI
+        run: git clone --depth 1 https://github.com/mpc-msri/EzPC.git /tmp/EzPC
+      - name: Install Exp216 sources
+        run: |
+          mkdir -p /tmp/EzPC/SCI/tests/exp216
+          cp experiments/exp216_dual_share_cert_e2e.cpp /tmp/EzPC/SCI/tests/exp216/
+          cp experiments/exp198_leaf/prepared_shared_leaf_lookup16.h /tmp/EzPC/SCI/tests/exp216/
+          cp experiments/exp196_orcompact/shared_controls.h /tmp/EzPC/SCI/tests/exp216/
+          cp experiments/exp196_orcompact/private_gates.h /tmp/EzPC/SCI/tests/exp216/
+          cp experiments/exp196_orcompact/orcompact_scatter.h /tmp/EzPC/SCI/tests/exp216/
+          cp experiments/exp196_orcompact/orcompact_plan.cpp /tmp/EzPC/SCI/tests/exp216/
+          printf '\n' >> /tmp/EzPC/SCI/tests/CMakeLists.txt
+          cat >> /tmp/EzPC/SCI/tests/CMakeLists.txt <<'EOF'
+          find_package(SEAL 4.1 REQUIRED)
+          add_executable(exp216-full-e2e
+            exp216/exp216_dual_share_cert_e2e.cpp
+            exp216/orcompact_plan.cpp)
+          target_include_directories(exp216-full-e2e PRIVATE exp216)
+          target_link_libraries(exp216-full-e2e SCI-OT SCI-GC SEAL::seal)
+          EOF
+      - name: Initialize and patch legacy SEAL
+        run: |
+          git -C /tmp/EzPC submodule update --init --depth 1 SCI/extern/SEAL
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path("/tmp/EzPC/SCI/extern/SEAL/native/src/seal/util/locks.h")
+          s=p.read_text()
+          if "#include <mutex>" not in s:
+              s=s.replace("#pragma once","#pragma once\n#include <mutex>")
+              p.write_text(s)
+          PY
+      - name: Configure
+        working-directory: /tmp/EzPC/SCI
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON -DBUILD_NETWORKS=OFF
+      - name: Build
+        working-directory: /tmp/EzPC/SCI
+        run: cmake --build build --target exp216-full-e2e -j2
+      - name: Run two-party Exp216
+        working-directory: /tmp/EzPC/SCI
+        shell: bash
+        run: |
+          set -uo pipefail
+          ./build/bin/exp216-full-e2e r=1 p=20330 > "$GITHUB_WORKSPACE/results/exp216_P1.log" 2>&1 &
+          P1=$!
+          sleep 0.3
+          ./build/bin/exp216-full-e2e r=2 p=20330 ip=127.0.0.1 > "$GITHUB_WORKSPACE/results/exp216_P2.log" 2>&1
+          C2=$?
+          wait "$P1"; C1=$?
+          cat "$GITHUB_WORKSPACE/results/exp216_P1.log"
+          cat "$GITHUB_WORKSPACE/results/exp216_P2.log"
+          if [ "$C1" -ne 0 ] || [ "$C2" -ne 0 ]; then exit 3; fi
+      - name: Parse
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import json,pathlib
+          rows=[]; phases=[]
+          for p in sorted(pathlib.Path("results").glob("exp216_P*.log")):
+              for line in p.read_text().splitlines():
+                  if line.startswith("EXP216_PHASE "):
+                      d={"source":p.name}
+                      for tok in line[len("EXP216_PHASE "):].split():
+                          k,v=tok.split("=",1)
+                          try:d[k]=float(v) if "." in v else int(v)
+                          except:d[k]=v
+                      phases.append(d)
+                  elif line.startswith("EXP216_RESULT "):
+                      d={"source":p.name}
+                      for tok in line[len("EXP216_RESULT "):].split():
+                          k,v=tok.split("=",1)
+                          try:d[k]=float(v) if "." in v else int(v)
+                          except:d[k]=v
+                      rows.append(d)
+          report={"experiment":"Exp216 dual-share certificate E2E","rows":rows,"phases":phases}
+          pathlib.Path("results/exp216_full_e2e.json").write_text(json.dumps(report,indent=2))
+          print(json.dumps(report,indent=2))
+          if len(rows)!=2: raise SystemExit(f"expected 2 rows got {len(rows)}")
+          if any(r.get("mismatches",1) for r in rows): raise SystemExit("mismatch")
+          if any(r.get("movement_conceptual_rounds")!=5 for r in rows): raise SystemExit("movement round model")
+          if any(r.get("opened_weight")!=320 for r in rows): raise SystemExit("fixed weight")
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: exp216-full-e2e-5round
+          path: results/exp216_*
+          if-no-files-found: error
