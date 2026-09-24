@@ -36,7 +36,7 @@ jobs:
       - name: Install Exp222 sources
         run: |
           mkdir -p /tmp/EzPC/SCI/tests/exp222
-          cp experiments/exp222_fused_masked_e2e.cpp /tmp/EzPC/SCI/tests/exp222/
+          cp experiments/exp222_prepared_route_e2e.cpp /tmp/EzPC/SCI/tests/exp222/
           cp experiments/exp198_leaf/prepared_shared_leaf_lookup16.h /tmp/EzPC/SCI/tests/exp222/
           cp experiments/exp196_orcompact/shared_controls.h /tmp/EzPC/SCI/tests/exp222/
           cp experiments/exp196_orcompact/private_gates.h /tmp/EzPC/SCI/tests/exp222/
