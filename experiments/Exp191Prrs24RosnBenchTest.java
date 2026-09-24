@@ -7,6 +7,10 @@ import edu.alibaba.mpc4j.s2pc.aby.pcg.osn.rosn.prrs24.Prrs24OprfRosnConfig;
 import edu.alibaba.mpc4j.s2pc.pcg.ot.conv32.Conv32Factory.Conv32Type;
 import org.junit.Test;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
+
 import java.util.concurrent.TimeUnit;
 
 public class Exp191Prrs24RosnBenchTest extends AbstractTwoPartyMemoryRpcPto {
@@ -76,7 +80,7 @@ public class Exp191Prrs24RosnBenchTest extends AbstractTwoPartyMemoryRpcPto {
         long senderPackets = firstRpc.getSendDataPacketNum();
         long receiverPackets = secondRpc.getSendDataPacketNum();
 
-        System.out.printf(
+        String result = String.format(
             "EXP191_RESULT mode=%s num=%d byte_length=%d ms=%d " +
             "sender_bytes=%d receiver_bytes=%d total_bytes=%d " +
             "sender_payload=%d receiver_payload=%d total_payload=%d " +
@@ -86,6 +90,16 @@ public class Exp191Prrs24RosnBenchTest extends AbstractTwoPartyMemoryRpcPto {
             senderPayload, receiverPayload, senderPayload + receiverPayload,
             senderPackets, receiverPackets, senderPackets + receiverPackets
         );
+        System.out.print(result);
+        String outPath = System.getProperty("exp191.out");
+        if (outPath != null) {
+            try {
+                Files.writeString(Path.of(outPath), result,
+                    StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }
 
         new Thread(sender::destroy).start();
         new Thread(receiver::destroy).start();
