@@ -1,0 +1,97 @@
+name: exp186-prrs24-permutation-correlation-bench
+
+on:
+  push:
+    paths:
+      - '.github/workflows/exp186-prrs24-permutation-correlation-bench.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  bench:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    env:
+      TDA_COMMIT: e658ff2364e9cce0232dea6280c1bf7999e0716d
+      MPC4J_COMMIT: ea3b9aa99389adbe6219b0b909d2cc39cacad2bd
+    steps:
+      - name: Init
+        run: |
+          set -euo pipefail
+          TASK_DIR="$RUNNER_TEMP/exp186-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          echo "TASK_DIR=$TASK_DIR" >> "$GITHUB_ENV"
+          mkdir -p "$TASK_DIR/result"
+
+      - name: Checkout private benchmark
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: hubugui1111-lab/tda-ppml-research
+          ref: ${{ env.TDA_COMMIT }}
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          path: private-research
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Fetch pinned MPC4J
+        run: |
+          set -euo pipefail
+          git clone --no-checkout https://github.com/alibaba-edu/mpc4j.git "$TASK_DIR/mpc4j"
+          git -C "$TASK_DIR/mpc4j" fetch --depth 1 origin "$MPC4J_COMMIT"
+          git -C "$TASK_DIR/mpc4j" checkout --detach "$MPC4J_COMMIT"
+          java -version
+          mvn -version
+
+      - name: Install Exp186 test
+        run: |
+          set -euo pipefail
+          DST="$TASK_DIR/mpc4j/mpc4j-s2pc-aby/src/test/java/edu/alibaba/mpc4j/s2pc/aby/pcg/osn/rosn/Exp186Prrs24RosnBenchTest.java"
+          cp private-research/experiments/186_mpc4j_prrs24_rosn_bench_test.java "$DST"
+
+      - name: Run PRRS24 n3072 x 6-byte benchmark
+        run: |
+          set -euo pipefail
+          cd "$TASK_DIR/mpc4j"
+          mvn -q -pl mpc4j-s2pc-aby -am             -Dtest=Exp186Prrs24RosnBenchTest             -DfailIfNoTests=false             test 2>&1 | tee "$TASK_DIR/result/raw.log"
+          grep 'EXP186_RESULT' "$TASK_DIR/result/raw.log" | tee "$TASK_DIR/result/results.txt"
+          test -s "$TASK_DIR/result/results.txt"
+
+      - name: Parse summary
+        run: |
+          TASK="$TASK_DIR" python3 - <<'PY'
+          import json, os, pathlib, re
+          root=pathlib.Path(os.environ["TASK"])/"result"
+          rows=[]
+          for line in (root/"results.txt").read_text().splitlines():
+              m=re.search(r"EXP186_RESULT (.*)$",line)
+              if not m: continue
+              d={}
+              for item in m.group(1).split():
+                  k,v=item.split("=",1)
+                  d[k]=v if k=="mode" else int(v)
+              rows.append(d)
+          if len(rows)!=2:
+              raise SystemExit(f"expected 2 rows, got {rows}")
+          payload={
+            "experiment":"Exp186 MPC4J PRRS24 permutation-correlation/ROSN microbenchmark",
+            "mpc4j_commit":os.environ.get("MPC4J_COMMIT"),
+            "num":3072,
+            "byte_length":6,
+            "rows":rows,
+            "evidence_status":"standalone MemoryRpc PRRS24 benchmark; not integrated into SCI/BOLT PrivateReluTail"
+          }
+          (root/"summary.json").write_text(json.dumps(payload,indent=2))
+          print(json.dumps(payload,indent=2))
+          PY
+
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: exp186-prrs24-${{ github.run_id }}
+          path: |
+            ${{ env.TASK_DIR }}/result/summary.json
+            ${{ env.TASK_DIR }}/result/results.txt
+            ${{ env.TASK_DIR }}/result/raw.log
+          retention-days: 3
+          if-no-files-found: warn
