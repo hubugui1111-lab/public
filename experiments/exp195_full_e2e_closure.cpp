@@ -170,11 +170,14 @@ int main(int argc,char**argv){
   });
 
   FixArray final_out(party,N,true,ELL,0);
-  Phase ph_gather{},ph_tail{},ph_scatter{},ph_merge{},ph_overflow{};
+  Phase ph_mask{},ph_gather{},ph_tail{},ph_scatter{},ph_merge{},ph_overflow{};
   if(accepted){
+    FixArray unresolved_z;
+    ph_mask=measure(io,[&]{unresolved_z=math.fix->if_else(marks,z,uint64_t(0));});
     BoolArray padded_marks(party,PADN);
+    std::fill(padded_marks.data,padded_marks.data+PADN,0);
     std::vector<uint64_t> wires(PADN,0);
-    for(int i=0;i<N;++i){padded_marks.data[i]=marks.data[i];wires[i]=z.data[i];}
+    for(int i=0;i<N;++i){padded_marks.data[i]=marks.data[i];wires[i]=unresolved_z.data[i];}
     std::vector<SortStage> stages;
     ph_gather=measure(io,[&]{stages=bitonic_compact(math,padded_marks,wires);});
 
@@ -217,7 +220,8 @@ int main(int argc,char**argv){
   print_phase("probe15",party,ph_probe); print_phase("secret_route",party,ph_route);
   print_phase("leaf_param_select",party,ph_leaf); print_phase("certificate_arithmetic",party,ph_arith);
   print_phase("certificate_secure_compare",party,ph_cert); print_phase("certified_output_mul",party,ph_predout);
-  print_phase("secret_count_accept",party,ph_count); print_phase("private_compaction_gather",party,ph_gather);
+  print_phase("secret_count_accept",party,ph_count); print_phase("mask_unresolved_payload",party,ph_mask);
+  print_phase("private_compaction_gather",party,ph_gather);
   print_phase("native_tail_relu",party,ph_tail); print_phase("private_compaction_scatter",party,ph_scatter);
   print_phase("merge",party,ph_merge); print_phase("overflow_full_relu",party,ph_overflow);
   print_phase("full_relu_baseline",party,ph_full);
