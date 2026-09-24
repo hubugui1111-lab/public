@@ -656,15 +656,14 @@ int main(int argc,char**argv){
     BoolArray pos_cert(party,N),neg_cert(party,N);
     for(int i=0;i<N;++i){pos_cert.data[i]=pair_cert.data[i];neg_cert.data[i]=pair_cert.data[N+i];}
 
-    // In one second Beaver layer compute:
-    // sel = pred & (pos_cert XOR neg_cert)
-    // safe_positive = pred & pos_cert
+    // Second layer computes the two mutually exclusive certified branches:
+    // safe_pos = pred & pos_cert; safe_neg = (~pred) & neg_cert.
     BoolArray layer_x(party,2*N),layer_y(party,2*N);
     for(int i=0;i<N;++i){
       layer_x.data[i]=pred_pos.data[i];
-      layer_y.data[i]=pos_cert.data[i]^neg_cert.data[i];
-      layer_x.data[N+i]=pred_pos.data[i];
-      layer_y.data[N+i]=pos_cert.data[i];
+      layer_y.data[i]=pos_cert.data[i];
+      layer_x.data[N+i]=pred_pos.data[i]^uint8_t(party==ALICE);
+      layer_y.data[N+i]=neg_cert.data[i];
     }
     BoolArray layer_out;FixArray layer_add;
     beaver_bool_and_dual(io,party,layer_x,layer_y,
