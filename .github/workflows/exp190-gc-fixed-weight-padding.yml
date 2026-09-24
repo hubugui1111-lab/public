@@ -1,0 +1,114 @@
+name: Exp190 GC fixed-weight padding
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - 'experiments/exp190_gc_dummy_padding.cpp'
+      - 'experiments/exp190_CMakeLists.txt'
+      - '.github/workflows/exp190-gc-fixed-weight-padding.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  exp190:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare
+        run: mkdir -p /tmp/emp-install /tmp/exp190 "$GITHUB_WORKSPACE/results"
+
+      - name: Build emp-tool
+        run: |
+          git clone --depth 1 https://github.com/emp-toolkit/emp-tool.git /tmp/emp-tool
+          cmake -S /tmp/emp-tool -B /tmp/emp-tool/build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/tmp/emp-install
+          cmake --build /tmp/emp-tool/build -j2
+          cmake --install /tmp/emp-tool/build
+
+      - name: Build emp-ot
+        run: |
+          git clone --depth 1 https://github.com/emp-toolkit/emp-ot.git /tmp/emp-ot
+          cmake -S /tmp/emp-ot -B /tmp/emp-ot/build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/tmp/emp-install -DCMAKE_PREFIX_PATH=/tmp/emp-install
+          cmake --build /tmp/emp-ot/build -j2
+          cmake --install /tmp/emp-ot/build
+
+      - name: Build emp-sh2pc
+        run: |
+          git clone --depth 1 https://github.com/emp-toolkit/emp-sh2pc.git /tmp/emp-sh2pc
+          cmake -S /tmp/emp-sh2pc -B /tmp/emp-sh2pc/build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/tmp/emp-install -DCMAKE_PREFIX_PATH=/tmp/emp-install
+          cmake --build /tmp/emp-sh2pc/build -j2
+          cmake --install /tmp/emp-sh2pc/build
+
+      - name: Build Exp190
+        run: |
+          cp experiments/exp190_gc_dummy_padding.cpp /tmp/exp190/
+          cp experiments/exp190_CMakeLists.txt /tmp/exp190/CMakeLists.txt
+          cmake -S /tmp/exp190 -B /tmp/exp190/build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/tmp/emp-install
+          cmake --build /tmp/exp190/build -j2
+
+      - name: Run two-party cases
+        shell: bash
+        run: |
+          set -euo pipefail
+          run_case() {
+            B="$1"; W="$2"; PORT="$3"; NAME="B${B}_W${W}"
+            EMP_PORT="$PORT" /tmp/exp190/build/exp190 1 "$B" "$W" > "results/exp190_${NAME}_P1.log" 2>&1 &
+            P1=$!
+            sleep 0.2
+            EMP_PORT="$PORT" EMP_PEER_IP=127.0.0.1 /tmp/exp190/build/exp190 2 "$B" "$W" > "results/exp190_${NAME}_P2.log" 2>&1
+            wait "$P1"
+            cat "results/exp190_${NAME}_P1.log"
+            cat "results/exp190_${NAME}_P2.log"
+          }
+          run_case 320 214 19820
+          run_case 320 319 19821
+          run_case 640 292 19822
+
+      - name: Parse results
+        run: |
+          python3 - <<'PY'
+          import json, pathlib
+          rows=[]
+          for p in sorted(pathlib.Path("results").glob("exp190_*_P*.log")):
+              for line in p.read_text().splitlines():
+                  if not line.startswith("EXP190_RESULT "): continue
+                  row={"source":p.name}
+                  for tok in line[len("EXP190_RESULT "):].split():
+                      k,v=tok.split("=",1)
+                      try: row[k]=float(v) if "." in v else int(v)
+                      except ValueError: row[k]=v
+                  rows.append(row)
+          if len(rows)!=6:
+              raise SystemExit(f"expected 6 party rows, got {len(rows)}")
+          cases={}
+          for r in rows:
+              key=(r["B"],r["w"])
+              cases.setdefault(key,[]).append(r)
+          summary=[]
+          for (B,w),rs in sorted(cases.items()):
+              summary.append({
+                  "B":B,"w":w,
+                  "max_protocol_bytes":max(x["protocol_bytes"] for x in rs),
+                  "max_protocol_ms":max(x["protocol_ms"] for x in rs),
+                  "dummy_weight":rs[0]["dummy_weight"],
+                  "mismatches":sum(x["mismatches"] for x in rs),
+              })
+          report={
+              "experiment":"Exp190 GC fixed-weight dummy padding",
+              "scope":"count-share -> public fallback bit + XOR-shared dummy flags; no Exp170 semantic change",
+              "summary":summary,
+              "rows":rows,
+          }
+          pathlib.Path("results/exp190_gc_fixed_weight_padding.json").write_text(json.dumps(report,indent=2))
+          print(json.dumps(report,indent=2))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: exp190-gc-fixed-weight-padding
+          path: results/exp190_*
+          if-no-files-found: error
