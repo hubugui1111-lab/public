@@ -33,6 +33,14 @@ jobs:
           persist-credentials: false
           fetch-depth: 1
 
+      - name: Install Java 17
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq openjdk-17-jdk
+          echo "JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64" >> "$GITHUB_ENV"
+          echo "/usr/lib/jvm/java-17-openjdk-amd64/bin" >> "$GITHUB_PATH"
+
       - name: Fetch pinned MPC4J
         run: |
           set -euo pipefail
