@@ -24,6 +24,7 @@ jobs:
       - name: Install source
         run: |
           cp experiments/exp194_secure_leaf_certificate_audit.cpp /tmp/EzPC/SCI/tests/exp194_secure_leaf_certificate_audit.cpp
+          printf '\n' >> /tmp/EzPC/SCI/tests/CMakeLists.txt
           cat >> /tmp/EzPC/SCI/tests/CMakeLists.txt <<'EOF'
           add_executable(exp194-secure-audit exp194_secure_leaf_certificate_audit.cpp)
           target_link_libraries(exp194-secure-audit SCI-OT)
