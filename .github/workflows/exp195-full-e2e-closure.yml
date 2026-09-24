@@ -52,14 +52,17 @@ jobs:
         working-directory: /tmp/EzPC/SCI
         shell: bash
         run: |
-          set -euo pipefail
+          set +e
           ./build/bin/exp195-full-e2e r=1 p=20250 > "$GITHUB_WORKSPACE/results/exp195_P1.log" 2>&1 &
           P1=$!
           sleep 0.2
           ./build/bin/exp195-full-e2e r=2 p=20250 ip=127.0.0.1 > "$GITHUB_WORKSPACE/results/exp195_P2.log" 2>&1
+          R2=$?
           wait "$P1"
+          R1=$?
           cat "$GITHUB_WORKSPACE/results/exp195_P1.log"
           cat "$GITHUB_WORKSPACE/results/exp195_P2.log"
+          test "$R1" -eq 0 -a "$R2" -eq 0
       - name: Parse
         run: |
           python3 - <<'PY'
@@ -88,6 +91,7 @@ jobs:
           print(json.dumps(report,indent=2))
           PY
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: exp195-full-e2e-closure
           path: results/exp195_*
