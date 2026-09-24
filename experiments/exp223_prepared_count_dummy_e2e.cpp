@@ -341,10 +341,24 @@ struct PreparedRouteGC222{
       Bit delta=dummy^ma[j]^mb[j];
       labels[j+1]=delta.bit;
     }
-    std::unique_ptr<bool[]> opened(new bool[CAP+1]);
-    prot_exec->reveal(opened.get(),PUBLIC,labels.data(),CAP+1);
+    // True batched PUBLIC reveal.  SCI's generic reveal(length) still
+    // loops over labels and calls send_data once per bit, which inflates the
+    // measured transport count.  Decode all labels with one vector message in
+    // each direction instead.
+    std::vector<uint8_t> opened(CAP+1),gen_lsb(CAP+1);
+    auto* gc_io=math.iopack->io_GC;
+    if(math.party==ALICE){
+      for(int i=0;i<CAP+1;++i)gen_lsb[i]=uint8_t(getLSB(labels[i]));
+      gc_io->send_data(gen_lsb.data(),CAP+1);gc_io->flush();
+      gc_io->recv_data(opened.data(),CAP+1);
+    }else{
+      gc_io->recv_data(gen_lsb.data(),CAP+1);
+      for(int i=0;i<CAP+1;++i)
+        opened[i]=uint8_t(bool(gen_lsb[i])!=bool(getLSB(labels[i])));
+      gc_io->send_data(opened.data(),CAP+1);gc_io->flush();
+    }
     out.accepted=opened[0];
-    for(int j=0;j<CAP;++j)out.opened_delta[j]=uint8_t(opened[j+1]);
+    for(int j=0;j<CAP;++j)out.opened_delta[j]=opened[j+1];
     math.iopack->io_GC->flush();
     return out;
   }
