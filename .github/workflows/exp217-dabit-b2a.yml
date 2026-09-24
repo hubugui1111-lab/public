@@ -1,0 +1,58 @@
+name: Exp217 daBit B2A benchmark
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - 'experiments/exp217_dabit_b2a.cpp'
+      - '.github/workflows/exp217-dabit-b2a.yml'
+permissions:
+  contents: read
+jobs:
+  exp217:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install deps
+        run: sudo apt-get update -qq && sudo apt-get install -y libmpfr-dev libgmp-dev
+      - name: Clone EzPC
+        run: git clone --depth 1 https://github.com/mpc-msri/EzPC.git /tmp/EzPC
+      - name: Install source
+        run: |
+          cp experiments/exp217_dabit_b2a.cpp /tmp/EzPC/SCI/tests/
+          printf '\n' >> /tmp/EzPC/SCI/tests/CMakeLists.txt
+          cat >> /tmp/EzPC/SCI/tests/CMakeLists.txt <<'EOF'
+          add_executable(exp217-dabit-b2a exp217_dabit_b2a.cpp)
+          target_link_libraries(exp217-dabit-b2a SCI-OT)
+          EOF
+      - name: Patch legacy SEAL
+        run: |
+          git -C /tmp/EzPC submodule update --init --depth 1 SCI/extern/SEAL
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path("/tmp/EzPC/SCI/extern/SEAL/native/src/seal/util/locks.h")
+          s=p.read_text()
+          if "#include <mutex>" not in s:
+              p.write_text(s.replace("#pragma once","#pragma once\n#include <mutex>"))
+          PY
+      - name: Configure
+        working-directory: /tmp/EzPC/SCI
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON -DBUILD_NETWORKS=OFF
+      - name: Build
+        working-directory: /tmp/EzPC/SCI
+        run: cmake --build build --target exp217-dabit-b2a -j2
+      - name: Run
+        working-directory: /tmp/EzPC/SCI
+        shell: bash
+        run: |
+          set -uo pipefail
+          ./build/bin/exp217-dabit-b2a r=1 p=20410 > /tmp/p1.log 2>&1 &
+          P1=$!
+          sleep 0.2
+          ./build/bin/exp217-dabit-b2a r=2 p=20410 ip=127.0.0.1 > /tmp/p2.log 2>&1
+          C2=$?
+          wait "$P1"; C1=$?
+          cat /tmp/p1.log
+          cat /tmp/p2.log
+          if [ "$C1" -ne 0 ] || [ "$C2" -ne 0 ]; then exit 3; fi
