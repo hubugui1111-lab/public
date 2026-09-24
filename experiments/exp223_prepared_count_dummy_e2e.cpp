@@ -327,17 +327,24 @@ struct PreparedRouteGC222{
     Integer w=wa+wb;
     Integer cap(WBITS,CAP,PUBLIC);
     Bit accept=(w<=cap);
-    CountDummyResult out;out.accepted=accept.reveal<bool>(PUBLIC);
-    out.opened_delta.resize(CAP);
+    CountDummyResult out;out.opened_delta.resize(CAP);
 
-    // dummy_j = [w <= CAP-j-1].  Reveal only dummy_j XOR a_j where a_j is
-    // the preprocessed random daBit.  This is uniform and leaks no dummy bit.
+    // Build every masked dummy output first, then reveal accept + all masked
+    // dummy bits in ONE batched PUBLIC reveal.  Calling reveal() inside the
+    // loop serializes the protocol and was the source of Exp223-v1's 647
+    // measured rounds.
+    std::vector<block128> labels(CAP+1);
+    labels[0]=accept.bit;
     for(int j=0;j<CAP;++j){
       Integer threshold(WBITS,CAP-j-1,PUBLIC);
       Bit dummy=(w<=threshold);
       Bit delta=dummy^ma[j]^mb[j];
-      out.opened_delta[j]=uint8_t(delta.reveal<bool>(PUBLIC));
+      labels[j+1]=delta.bit;
     }
+    std::unique_ptr<bool[]> opened(new bool[CAP+1]);
+    prot_exec->reveal(opened.get(),PUBLIC,labels.data(),CAP+1);
+    out.accepted=opened[0];
+    for(int j=0;j<CAP;++j)out.opened_delta[j]=uint8_t(opened[j+1]);
     math.iopack->io_GC->flush();
     return out;
   }
