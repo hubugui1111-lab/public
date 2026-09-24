@@ -1,0 +1,101 @@
+name: Exp195 functional end-to-end closure
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - 'experiments/exp195_functional_e2e_closure.cpp'
+      - '.github/workflows/exp195-functional-e2e-closure.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  exp195:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare
+        run: mkdir -p "$GITHUB_WORKSPACE/results"
+      - name: Clone EzPC SCI
+        run: git clone --depth 1 https://github.com/mpc-msri/EzPC.git /tmp/EzPC
+      - name: Install source
+        run: |
+          cp experiments/exp195_functional_e2e_closure.cpp /tmp/EzPC/SCI/tests/exp195_functional_e2e_closure.cpp
+          cat >> /tmp/EzPC/SCI/tests/CMakeLists.txt <<'EOF'
+          add_executable(exp195-functional-e2e exp195_functional_e2e_closure.cpp)
+          target_link_libraries(exp195-functional-e2e SCI-OT)
+          EOF
+      - name: Initialize and patch legacy SEAL
+        run: |
+          git -C /tmp/EzPC submodule update --init --depth 1 SCI/extern/SEAL
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path("/tmp/EzPC/SCI/extern/SEAL/native/src/seal/util/locks.h")
+          s=p.read_text()
+          if "#include <mutex>" not in s:
+              s=s.replace("#pragma once", "#pragma once\n#include <mutex>")
+              p.write_text(s)
+          print("patched",p)
+          PY
+      - name: Configure
+        working-directory: /tmp/EzPC/SCI
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON -DBUILD_NETWORKS=OFF
+      - name: Build
+        working-directory: /tmp/EzPC/SCI
+        run: cmake --build build --target exp195-functional-e2e -j2
+      - name: Run two-party e2e
+        working-directory: /tmp/EzPC/SCI
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./build/bin/exp195-functional-e2e r=1 p=20250 > "$GITHUB_WORKSPACE/results/exp195_P1.log" 2>&1 &
+          P1=$!
+          sleep 0.2
+          ./build/bin/exp195-functional-e2e r=2 p=20250 ip=127.0.0.1 > "$GITHUB_WORKSPACE/results/exp195_P2.log" 2>&1
+          wait "$P1"
+          cat "$GITHUB_WORKSPACE/results/exp195_P1.log"
+          cat "$GITHUB_WORKSPACE/results/exp195_P2.log"
+      - name: Parse
+        run: |
+          python3 - <<'PY'
+          import json,pathlib
+          rows=[]; phases=[]
+          for p in sorted(pathlib.Path("results").glob("exp195_P*.log")):
+              for line in p.read_text().splitlines():
+                  if line.startswith("EXP195_PHASE "):
+                      d={"source":p.name}
+                      for tok in line[len("EXP195_PHASE "):].split():
+                          k,v=tok.split("=",1)
+                          try:d[k]=float(v) if "." in v else int(v)
+                          except:d[k]=v
+                      phases.append(d)
+                  elif line.startswith("EXP195_RESULT "):
+                      d={"source":p.name}
+                      for tok in line[len("EXP195_RESULT "):].split():
+                          k,v=tok.split("=",1)
+                          try:d[k]=float(v) if "." in v else int(v)
+                          except:d[k]=v
+                      rows.append(d)
+          if len(rows)!=2: raise SystemExit(f"expected 2 result rows, got {len(rows)}")
+          if any(r["mismatches"] for r in rows): raise SystemExit("mismatch")
+          alice=next(r for r in rows if r["party"]==1)
+          report={
+            "experiment":"Exp195 functional exact end-to-end closure",
+            "scope":"single real 2PC process from secret z through secret probes/leaf/parameter selection/certificate, dense exact native fallback and secret merge; intentionally unoptimized tail",
+            "alice":alice,
+            "phases":phases,
+            "e2e_vs_full_relu_bytes_ratio":alice["e2e_bytes"]/alice["baseline_full_relu_bytes"],
+            "e2e_vs_full_relu_rounds_ratio":alice["e2e_rounds"]/alice["baseline_full_relu_rounds"],
+            "e2e_vs_full_relu_ms_ratio":alice["e2e_ms"]/alice["baseline_full_relu_ms"],
+          }
+          pathlib.Path("results/exp195_functional_e2e_closure.json").write_text(json.dumps(report,indent=2))
+          print(json.dumps(report,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: exp195-functional-e2e-closure
+          path: results/exp195_*
+          if-no-files-found: error
