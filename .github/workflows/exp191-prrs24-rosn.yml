@@ -25,6 +25,16 @@ jobs:
       - name: Clone MPC4J
         run: git clone --depth 1 https://github.com/alibaba-edu/mpc4j.git /tmp/mpc4j
 
+      - name: Install MPC4J native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgmp-dev libntl-dev libsodium-dev
+          cmake -S /tmp/mpc4j/mpc4j-native-fourq -B /tmp/mpc4j/mpc4j-native-fourq/build -DCMAKE_BUILD_TYPE=Release
+          cmake --build /tmp/mpc4j/mpc4j-native-fourq/build -j2
+          sudo cmake --install /tmp/mpc4j/mpc4j-native-fourq/build
+          cmake -S /tmp/mpc4j/mpc4j-native-tool -B /tmp/mpc4j/mpc4j-native-tool/cmake-build-release -DCMAKE_BUILD_TYPE=Release
+          cmake --build /tmp/mpc4j/mpc4j-native-tool/cmake-build-release -j2
+
       - name: Install benchmark test
         run: |
           cp experiments/Exp191Prrs24RosnBenchTest.java             /tmp/mpc4j/mpc4j-s2pc-aby/src/test/java/edu/alibaba/mpc4j/s2pc/aby/pcg/osn/rosn/Exp191Prrs24RosnBenchTest.java
@@ -41,6 +51,7 @@ jobs:
             -Dsurefire.useFile=false \
             -Dsurefire.redirectTestOutputToFile=false \
             -Dexp191.out="$GITHUB_WORKSPACE/results/exp191.log" \
+            -DargLine="-Djava.library.path=/tmp/mpc4j/mpc4j-native-tool/cmake-build-release" \
             test
 
       - name: Parse
