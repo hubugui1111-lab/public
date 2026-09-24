@@ -1,0 +1,101 @@
+name: Exp192 GC thermometer padding
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - 'experiments/exp192_gc_thermometer_padding.cpp'
+      - 'experiments/exp192_CMakeLists.txt'
+      - '.github/workflows/exp192-gc-thermometer-padding.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  exp192:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare
+        run: mkdir -p /tmp/emp-install /tmp/exp192 "$GITHUB_WORKSPACE/results"
+      - name: Build emp-tool
+        run: |
+          git clone --depth 1 https://github.com/emp-toolkit/emp-tool.git /tmp/emp-tool
+          cmake -S /tmp/emp-tool -B /tmp/emp-tool/build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/tmp/emp-install
+          cmake --build /tmp/emp-tool/build -j2
+          cmake --install /tmp/emp-tool/build
+      - name: Build emp-ot
+        run: |
+          git clone --depth 1 https://github.com/emp-toolkit/emp-ot.git /tmp/emp-ot
+          cmake -S /tmp/emp-ot -B /tmp/emp-ot/build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/tmp/emp-install -DCMAKE_PREFIX_PATH=/tmp/emp-install
+          cmake --build /tmp/emp-ot/build -j2
+          cmake --install /tmp/emp-ot/build
+      - name: Build emp-sh2pc
+        run: |
+          git clone --depth 1 https://github.com/emp-toolkit/emp-sh2pc.git /tmp/emp-sh2pc
+          cmake -S /tmp/emp-sh2pc -B /tmp/emp-sh2pc/build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/tmp/emp-install -DCMAKE_PREFIX_PATH=/tmp/emp-install
+          cmake --build /tmp/emp-sh2pc/build -j2
+          cmake --install /tmp/emp-sh2pc/build
+      - name: Build Exp192
+        run: |
+          cp experiments/exp192_gc_thermometer_padding.cpp /tmp/exp192/
+          cp experiments/exp192_CMakeLists.txt /tmp/exp192/CMakeLists.txt
+          cmake -S /tmp/exp192 -B /tmp/exp192/build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/tmp/emp-install
+          cmake --build /tmp/exp192/build -j2
+      - name: Run cases
+        shell: bash
+        run: |
+          set -euo pipefail
+          run_case() {
+            B="$1"; W="$2"; PORT="$3"; NAME="B${B}_W${W}"
+            EMP_PORT="$PORT" /tmp/exp192/build/exp192 1 "$B" "$W" > "results/exp192_${NAME}_P1.log" 2>&1 &
+            P1=$!
+            sleep 0.2
+            EMP_PORT="$PORT" EMP_PEER_IP=127.0.0.1 /tmp/exp192/build/exp192 2 "$B" "$W" > "results/exp192_${NAME}_P2.log" 2>&1
+            wait "$P1"
+            cat "results/exp192_${NAME}_P1.log"
+            cat "results/exp192_${NAME}_P2.log"
+          }
+          run_case 320 214 19920
+          run_case 320 319 19921
+          run_case 320 321 19922
+          run_case 640 292 19923
+      - name: Parse
+        run: |
+          python3 - <<'PY'
+          import json,pathlib
+          rows=[]
+          for p in sorted(pathlib.Path("results").glob("exp192_*_P*.log")):
+              for line in p.read_text().splitlines():
+                  if not line.startswith("EXP192_RESULT "): continue
+                  row={"source":p.name}
+                  for tok in line[len("EXP192_RESULT "):].split():
+                      k,v=tok.split("=",1)
+                      try: row[k]=float(v) if "." in v else int(v)
+                      except ValueError: row[k]=v
+                  rows.append(row)
+          if len(rows)!=8: raise SystemExit(f"expected 8 rows got {len(rows)}")
+          cases={}
+          for r in rows: cases.setdefault((r["B"],r["w"]),[]).append(r)
+          summary=[]
+          for (B,w),rs in sorted(cases.items()):
+              summary.append({
+                "B":B,"w":w,
+                "max_protocol_bytes":max(x["protocol_bytes"] for x in rs),
+                "max_protocol_ms":max(x["protocol_ms"] for x in rs),
+                "accepted":rs[0]["accepted"],
+                "dummy_weight":rs[0]["dummy_weight"],
+                "decoder_ands":rs[0]["decoder_ands"],
+                "mismatches":sum(x["mismatches"] for x in rs),
+              })
+          report={"experiment":"Exp192 optimized thermometer GC padding","exp190_B320_bytes":450692,"exp190_B640_bytes":624772,"summary":summary,"rows":rows}
+          pathlib.Path("results/exp192_gc_thermometer_padding.json").write_text(json.dumps(report,indent=2))
+          print(json.dumps(report,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: exp192-gc-thermometer-padding
+          path: results/exp192_*
+          if-no-files-found: error
