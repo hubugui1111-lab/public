@@ -1,0 +1,70 @@
+name: Exp200 Kangaroo share compare
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - 'experiments/exp200_kangaroo_share_compare.cpp'
+      - '.github/workflows/exp200-kangaroo-share-compare.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  exp200:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare
+        run: mkdir -p "$GITHUB_WORKSPACE/results"
+      - name: Install deps
+        run: sudo apt-get update -qq && sudo apt-get install -y libmpfr-dev libgmp-dev
+      - name: Clone EzPC SCI
+        run: git clone --depth 1 https://github.com/mpc-msri/EzPC.git /tmp/EzPC
+      - name: Install source
+        run: |
+          cp experiments/exp200_kangaroo_share_compare.cpp /tmp/EzPC/SCI/tests/
+          printf '\n' >> /tmp/EzPC/SCI/tests/CMakeLists.txt
+          cat >> /tmp/EzPC/SCI/tests/CMakeLists.txt <<'EOF'
+          add_executable(exp200-kangaroo-share-compare exp200_kangaroo_share_compare.cpp)
+          target_link_libraries(exp200-kangaroo-share-compare SCI-OT)
+          EOF
+      - name: Initialize and patch legacy SEAL
+        run: |
+          git -C /tmp/EzPC submodule update --init --depth 1 SCI/extern/SEAL
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path("/tmp/EzPC/SCI/extern/SEAL/native/src/seal/util/locks.h")
+          s=p.read_text()
+          if "#include <mutex>" not in s:
+              s=s.replace("#pragma once","#pragma once\n#include <mutex>")
+              p.write_text(s)
+          PY
+      - name: Configure
+        working-directory: /tmp/EzPC/SCI
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON -DBUILD_NETWORKS=OFF
+      - name: Build
+        working-directory: /tmp/EzPC/SCI
+        run: cmake --build build --target exp200-kangaroo-share-compare -j2
+      - name: Run two-party
+        working-directory: /tmp/EzPC/SCI
+        shell: bash
+        run: |
+          set -uo pipefail
+          ./build/bin/exp200-kangaroo-share-compare r=1 p=20300 > "$GITHUB_WORKSPACE/results/exp200_P1.log" 2>&1 &
+          P1=$!
+          sleep 0.2
+          ./build/bin/exp200-kangaroo-share-compare r=2 p=20300 ip=127.0.0.1 > "$GITHUB_WORKSPACE/results/exp200_P2.log" 2>&1
+          C2=$?
+          wait "$P1"; C1=$?
+          cat "$GITHUB_WORKSPACE/results/exp200_P1.log"
+          cat "$GITHUB_WORKSPACE/results/exp200_P2.log"
+          if [ "$C1" -ne 0 ] || [ "$C2" -ne 0 ]; then exit 3; fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: exp200-kangaroo-share-compare
+          path: results/exp200_*
+          if-no-files-found: error
