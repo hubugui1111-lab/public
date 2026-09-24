@@ -31,19 +31,29 @@ jobs:
         working-directory: /tmp/secure-join
         run: python3 build.py -DENABLE_MOCK_OT=true -DENABLE_RELIC=false -DENABLE_SODIUM=false -DCMAKE_BUILD_TYPE=Release
 
+      - name: Verify benchmark binary
+        working-directory: /tmp/secure-join
+        run: test -x ./out/build/linux/frontend/secJoinfrontend
+
       - name: Smoke benchmark with mock correlations
         working-directory: /tmp/secure-join
+        shell: bash
         run: |
+          set -euo pipefail
           ./out/build/linux/frontend/secJoinfrontend -bench -Exp187 -n 3072 -B 320 -w 214 -mock 1 -nt 2 | tee "$GITHUB_WORKSPACE/results/exp187_mock_B320.log"
 
       - name: Real correlation benchmark B320
         working-directory: /tmp/secure-join
+        shell: bash
         run: |
+          set -euo pipefail
           ./out/build/linux/frontend/secJoinfrontend -bench -Exp187 -n 3072 -B 320 -w 214 -mock 0 -nt 2 | tee "$GITHUB_WORKSPACE/results/exp187_real_B320.log"
 
       - name: Real correlation benchmark B640
         working-directory: /tmp/secure-join
+        shell: bash
         run: |
+          set -euo pipefail
           ./out/build/linux/frontend/secJoinfrontend -bench -Exp187 -n 3072 -B 640 -w 292 -mock 0 -nt 2 | tee "$GITHUB_WORKSPACE/results/exp187_real_B640.log"
 
       - name: Parse compact result
