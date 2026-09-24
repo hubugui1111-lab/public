@@ -583,12 +583,30 @@ void install_additive_prep(int party,const AdditivePrepFile&x,PreparedPerm&p0,Pr
   PreparedPerm& recv = party==ALICE ? p1 : p0;
   own.p=x.own_perm;
   recv.p.resize(M);
-  own.fwd.owner.delta.assign(x.own_delta.begin(),x.own_delta.begin()+2*M);
-  own.inv.owner.delta.assign(x.own_delta.begin()+2*M,x.own_delta.end());
-  recv.fwd.recv.A.assign(x.recvA.begin(),x.recvA.begin()+2*M);
-  recv.inv.recv.A.assign(x.recvA.begin()+2*M,x.recvA.end());
-  recv.fwd.recv.B.assign(x.recvB.begin(),x.recvB.begin()+2*M);
-  recv.inv.recv.B.assign(x.recvB.begin()+2*M,x.recvB.end());
+
+  // File layout is row-major triples:
+  //   [forward_word0, forward_word1, inverse_word] for each row.
+  // Deinterleave explicitly.  The previous contiguous slicing mixed columns
+  // across rows; the correlation relation was valid but movement consumed the
+  // wrong lanes.
+  own.fwd.owner.delta.resize(size_t(M)*2);
+  own.inv.owner.delta.resize(M);
+  recv.fwd.recv.A.resize(size_t(M)*2);
+  recv.inv.recv.A.resize(M);
+  recv.fwd.recv.B.resize(size_t(M)*2);
+  recv.inv.recv.B.resize(M);
+  for(int i=0;i<M;++i){
+    const size_t r=size_t(i)*3, f=size_t(i)*2;
+    own.fwd.owner.delta[f]=x.own_delta[r];
+    own.fwd.owner.delta[f+1]=x.own_delta[r+1];
+    own.inv.owner.delta[i]=x.own_delta[r+2];
+    recv.fwd.recv.A[f]=x.recvA[r];
+    recv.fwd.recv.A[f+1]=x.recvA[r+1];
+    recv.inv.recv.A[i]=x.recvA[r+2];
+    recv.fwd.recv.B[f]=x.recvB[r];
+    recv.fwd.recv.B[f+1]=x.recvB[r+1];
+    recv.inv.recv.B[i]=x.recvB[r+2];
+  }
 }
 
 std::vector<uint32_t> rand_ring(PRG128&rng,int n){
