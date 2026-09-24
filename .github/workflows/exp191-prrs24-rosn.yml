@@ -34,7 +34,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mvn -q -pl mpc4j-s2pc-aby -am             -Dtest=Exp191Prrs24RosnBenchTest             -Dsurefire.failIfNoSpecifiedTests=false             test | tee "$GITHUB_WORKSPACE/results/exp191.log"
+          mvn -q -pl mpc4j-s2pc-aby -am \
+            -Dtest=Exp191Prrs24RosnBenchTest \
+            -Dsurefire.failIfNoSpecifiedTests=false \
+            -Dsurefire.useFile=false \
+            -Dsurefire.redirectTestOutputToFile=false \
+            test | tee "$GITHUB_WORKSPACE/results/exp191.log"
 
       - name: Parse
         run: |
