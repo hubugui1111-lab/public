@@ -29,10 +29,11 @@ int main(int argc,char**argv){
   std::vector<uint64_t> share(N),out(N),peer(N),out_peer(N);
   if(party==ALICE){
     std::vector<uint64_t> other(N);
+    prg.random_data(share.data(),N*8);
     for(int i=0;i<N;++i){
       int64_t clear=(int64_t(i)*7919)%2000001-1000000;
       uint64_t v=uint64_t(clear)&mask;
-      share[i]=prg.random_uint64()&mask;
+      share[i]&=mask;
       other[i]=(v-share[i])&mask;
     }
     io.io->send_data(other.data(),N*8);
