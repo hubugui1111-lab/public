@@ -1,0 +1,44 @@
+name: Exp224 exact-shape permutation correlation
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/exp224-exact-shape-perm-correlation.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  exp224:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare
+        run: mkdir -p "$GITHUB_WORKSPACE/results"
+      - name: Clone maintained secure-join
+        run: git clone --depth 1 https://github.com/ladnir/secure-join.git /tmp/secure-join
+      - name: Patch PPRF alignment
+        run: python3 scripts/patch_secure_join_pprf_alignment.py /tmp/secure-join
+      - name: Build secure-join with real base OT
+        working-directory: /tmp/secure-join
+        run: python3 build.py -DENABLE_MOCK_OT=false -DCMAKE_BUILD_TYPE=Release
+      - name: Benchmark exact Exp222 shapes
+        working-directory: /tmp/secure-join
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "=== forward 6-byte correlation ==="
+            ./out/build/linux/frontend/secJoinfrontend -bench -AltModPerm -n 3392 -m 6 -mock 0 -nt 1
+            echo "=== inverse 3-byte correlation ==="
+            ./out/build/linux/frontend/secJoinfrontend -bench -AltModPerm -n 3392 -m 3 -mock 0 -nt 1
+          } | tee "$GITHUB_WORKSPACE/results/exp224.log"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: exp224-exact-shape-perm-correlation
+          path: results/exp224.log
+          if-no-files-found: error
