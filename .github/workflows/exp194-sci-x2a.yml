@@ -1,0 +1,90 @@
+name: Exp194 SCI batched X2A
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - 'experiments/exp194_sci_x2a_words.cpp'
+      - '.github/workflows/exp194-sci-x2a.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  exp194:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare
+        run: mkdir -p "$GITHUB_WORKSPACE/results"
+      - name: Clone EzPC SCI
+        run: git clone --depth 1 https://github.com/mpc-msri/EzPC.git /tmp/EzPC
+      - name: Patch legacy SEAL GCC compatibility
+        run: sed -i '1i #include <mutex>' /tmp/EzPC/SCI/extern/SEAL/native/src/seal/util/locks.h
+      - name: Install Exp194 source
+        run: |
+          cp experiments/exp194_sci_x2a_words.cpp /tmp/EzPC/SCI/tests/exp194_sci_x2a_words.cpp
+          cat >> /tmp/EzPC/SCI/tests/CMakeLists.txt <<'EOF'
+          add_executable(exp194-sci-x2a exp194_sci_x2a_words.cpp)
+          target_link_libraries(exp194-sci-x2a SCI-OT)
+          EOF
+      - name: Build SCI Exp194
+        working-directory: /tmp/EzPC/SCI
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON -DBUILD_NETWORKS=OFF
+          cmake --build build --target exp194-sci-x2a -j2
+      - name: Run two-party cases
+        working-directory: /tmp/EzPC/SCI
+        shell: bash
+        run: |
+          set -euo pipefail
+          run_case() {
+            N="$1"; PORT="$2"; NAME="N${N}"
+            ./build/bin/exp194-sci-x2a r=1 p="$PORT" N="$N" > "$GITHUB_WORKSPACE/results/exp194_${NAME}_P1.log" 2>&1 &
+            P1=$!
+            sleep 0.2
+            ./build/bin/exp194-sci-x2a r=2 p="$PORT" ip=127.0.0.1 N="$N" > "$GITHUB_WORKSPACE/results/exp194_${NAME}_P2.log" 2>&1
+            wait "$P1"
+            cat "$GITHUB_WORKSPACE/results/exp194_${NAME}_P1.log"
+            cat "$GITHUB_WORKSPACE/results/exp194_${NAME}_P2.log"
+          }
+          run_case 3392 20200
+          run_case 3712 20201
+      - name: Parse
+        run: |
+          python3 - <<'PY'
+          import json,pathlib
+          rows=[]
+          for p in sorted(pathlib.Path("results").glob("exp194_*_P*.log")):
+              for line in p.read_text().splitlines():
+                  if not line.startswith("EXP194_RESULT "): continue
+                  row={"source":p.name}
+                  for tok in line[len("EXP194_RESULT "):].split():
+                      k,v=tok.split("=",1)
+                      try: row[k]=float(v) if "." in v else int(v)
+                      except ValueError: row[k]=v
+                  rows.append(row)
+          if len(rows)!=4: raise SystemExit(f"expected 4 rows got {len(rows)}")
+          cases={}
+          for r in rows: cases.setdefault(r["N"],[]).append(r)
+          summary=[]
+          for N,rs in sorted(cases.items()):
+              summary.append({
+                "N":N,
+                "max_rounds":max(x["rounds"] for x in rs),
+                "max_bytes":max(x["bytes"] for x in rs),
+                "max_ms":max(x["ms"] for x in rs),
+                "mismatches":sum(x["mismatches"] for x in rs),
+                "four_stage_bytes_estimate":4*max(x["bytes"] for x in rs),
+              })
+          report={"experiment":"Exp194 SCI batched XOR-word to additive Z_2^48 conversion","summary":summary,"rows":rows}
+          pathlib.Path("results/exp194_sci_x2a.json").write_text(json.dumps(report,indent=2))
+          print(json.dumps(report,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: exp194-sci-x2a
+          path: results/exp194_*
+          if-no-files-found: error
