@@ -1,0 +1,300 @@
+{
+  "backend": "OpenCheetah",
+  "commit": "a9b362e",
+  "layer": 1,
+  "N": 3072,
+  "CAP": 320,
+  "runs": [
+    {
+      "run": "exp252-cheetah-layer1",
+      "parties": {
+        "1": {
+          "result": {
+            "party": 1,
+            "N": 3072,
+            "capacity": 320,
+            "accepted": 1,
+            "cert_count": 3023,
+            "expected_cert": 3023,
+            "cert_fraction": 0.984049,
+            "movement_conceptual_rounds": 5,
+            "movement_iopack_rounds": 4,
+            "movement_bytes": 54272,
+            "opened_weight": 320,
+            "total_bytes": 772804,
+            "total_rounds": 26,
+            "total_ms": 2.79624,
+            "shuffle_preprocess_bytes": 0,
+            "shuffle_preprocess_ms": 0,
+            "relu_backend": "OpenCheetah_a9b362e",
+            "full_relu_bytes": 56608,
+            "full_relu_rounds": 0,
+            "full_relu_ms": 3.50641,
+            "mismatches": 0
+          },
+          "tail": {
+            "party": 1,
+            "name": "cheetah_tail_relu",
+            "bytes": 6040,
+            "rounds": 0,
+            "ms": 1.05144
+          },
+          "full": {
+            "party": 1,
+            "name": "cheetah_full_relu_baseline",
+            "bytes": 56608,
+            "rounds": 0,
+            "ms": 3.50641
+          },
+          "regression": {
+            "party": 1,
+            "gather_mismatches": 0,
+            "compare_mismatches": 0,
+            "wrap_failures": 0,
+            "route_mismatches": 0
+          }
+        },
+        "2": {
+          "result": {
+            "party": 2,
+            "N": 3072,
+            "capacity": 320,
+            "accepted": 1,
+            "cert_count": 3023,
+            "expected_cert": 0,
+            "cert_fraction": 0.984049,
+            "movement_conceptual_rounds": 5,
+            "movement_iopack_rounds": 4,
+            "movement_bytes": 54272,
+            "opened_weight": 320,
+            "total_bytes": 862897,
+            "total_rounds": 26,
+            "total_ms": 2.79895,
+            "shuffle_preprocess_bytes": 0,
+            "shuffle_preprocess_ms": 0,
+            "relu_backend": "OpenCheetah_a9b362e",
+            "full_relu_bytes": 56608,
+            "full_relu_rounds": 0,
+            "full_relu_ms": 3.54314,
+            "mismatches": 0
+          },
+          "tail": {
+            "party": 2,
+            "name": "cheetah_tail_relu",
+            "bytes": 6040,
+            "rounds": 0,
+            "ms": 1.07925
+          },
+          "full": {
+            "party": 2,
+            "name": "cheetah_full_relu_baseline",
+            "bytes": 56608,
+            "rounds": 0,
+            "ms": 3.54314
+          },
+          "regression": {
+            "party": 2,
+            "gather_mismatches": 0,
+            "compare_mismatches": 0,
+            "wrap_failures": 0,
+            "route_mismatches": 0
+          }
+        }
+      }
+    },
+    {
+      "run": "exp252-cheetah-layer1-32762",
+      "parties": {
+        "1": {
+          "result": {
+            "party": 1,
+            "N": 3072,
+            "capacity": 320,
+            "accepted": 1,
+            "cert_count": 3023,
+            "expected_cert": 3023,
+            "cert_fraction": 0.984049,
+            "movement_conceptual_rounds": 5,
+            "movement_iopack_rounds": 4,
+            "movement_bytes": 54272,
+            "opened_weight": 320,
+            "total_bytes": 772804,
+            "total_rounds": 26,
+            "total_ms": 3.39756,
+            "shuffle_preprocess_bytes": 0,
+            "shuffle_preprocess_ms": 0,
+            "relu_backend": "OpenCheetah_a9b362e",
+            "full_relu_bytes": 56608,
+            "full_relu_rounds": 0,
+            "full_relu_ms": 48.3219,
+            "mismatches": 0
+          },
+          "tail": {
+            "party": 1,
+            "name": "cheetah_tail_relu",
+            "bytes": 6040,
+            "rounds": 0,
+            "ms": 1.19814
+          },
+          "full": {
+            "party": 1,
+            "name": "cheetah_full_relu_baseline",
+            "bytes": 56608,
+            "rounds": 0,
+            "ms": 48.3219
+          },
+          "regression": {
+            "party": 1,
+            "gather_mismatches": 0,
+            "compare_mismatches": 0,
+            "wrap_failures": 0,
+            "route_mismatches": 0
+          }
+        },
+        "2": {
+          "result": {
+            "party": 2,
+            "N": 3072,
+            "capacity": 320,
+            "accepted": 1,
+            "cert_count": 3023,
+            "expected_cert": 0,
+            "cert_fraction": 0.984049,
+            "movement_conceptual_rounds": 5,
+            "movement_iopack_rounds": 4,
+            "movement_bytes": 54272,
+            "opened_weight": 320,
+            "total_bytes": 862897,
+            "total_rounds": 26,
+            "total_ms": 3.39638,
+            "shuffle_preprocess_bytes": 0,
+            "shuffle_preprocess_ms": 0,
+            "relu_backend": "OpenCheetah_a9b362e",
+            "full_relu_bytes": 56608,
+            "full_relu_rounds": 0,
+            "full_relu_ms": 4.06327,
+            "mismatches": 0
+          },
+          "tail": {
+            "party": 2,
+            "name": "cheetah_tail_relu",
+            "bytes": 6040,
+            "rounds": 0,
+            "ms": 1.2325
+          },
+          "full": {
+            "party": 2,
+            "name": "cheetah_full_relu_baseline",
+            "bytes": 56608,
+            "rounds": 0,
+            "ms": 4.06327
+          },
+          "regression": {
+            "party": 2,
+            "gather_mismatches": 0,
+            "compare_mismatches": 0,
+            "wrap_failures": 0,
+            "route_mismatches": 0
+          }
+        }
+      }
+    },
+    {
+      "run": "exp252-cheetah-layer1-32772",
+      "parties": {
+        "1": {
+          "result": {
+            "party": 1,
+            "N": 3072,
+            "capacity": 320,
+            "accepted": 1,
+            "cert_count": 3023,
+            "expected_cert": 3023,
+            "cert_fraction": 0.984049,
+            "movement_conceptual_rounds": 5,
+            "movement_iopack_rounds": 4,
+            "movement_bytes": 54272,
+            "opened_weight": 320,
+            "total_bytes": 772804,
+            "total_rounds": 26,
+            "total_ms": 2.8537,
+            "shuffle_preprocess_bytes": 0,
+            "shuffle_preprocess_ms": 0,
+            "relu_backend": "OpenCheetah_a9b362e",
+            "full_relu_bytes": 56608,
+            "full_relu_rounds": 0,
+            "full_relu_ms": 4.77275,
+            "mismatches": 0
+          },
+          "tail": {
+            "party": 1,
+            "name": "cheetah_tail_relu",
+            "bytes": 6040,
+            "rounds": 0,
+            "ms": 0.935794
+          },
+          "full": {
+            "party": 1,
+            "name": "cheetah_full_relu_baseline",
+            "bytes": 56608,
+            "rounds": 0,
+            "ms": 4.77275
+          },
+          "regression": {
+            "party": 1,
+            "gather_mismatches": 0,
+            "compare_mismatches": 0,
+            "wrap_failures": 0,
+            "route_mismatches": 0
+          }
+        },
+        "2": {
+          "result": {
+            "party": 2,
+            "N": 3072,
+            "capacity": 320,
+            "accepted": 1,
+            "cert_count": 3023,
+            "expected_cert": 0,
+            "cert_fraction": 0.984049,
+            "movement_conceptual_rounds": 5,
+            "movement_iopack_rounds": 4,
+            "movement_bytes": 54272,
+            "opened_weight": 320,
+            "total_bytes": 862897,
+            "total_rounds": 26,
+            "total_ms": 2.86112,
+            "shuffle_preprocess_bytes": 0,
+            "shuffle_preprocess_ms": 0,
+            "relu_backend": "OpenCheetah_a9b362e",
+            "full_relu_bytes": 56608,
+            "full_relu_rounds": 0,
+            "full_relu_ms": 8.52701,
+            "mismatches": 0
+          },
+          "tail": {
+            "party": 2,
+            "name": "cheetah_tail_relu",
+            "bytes": 6040,
+            "rounds": 0,
+            "ms": 0.961493
+          },
+          "full": {
+            "party": 2,
+            "name": "cheetah_full_relu_baseline",
+            "bytes": 56608,
+            "rounds": 0,
+            "ms": 8.52701
+          },
+          "regression": {
+            "party": 2,
+            "gather_mismatches": 0,
+            "compare_mismatches": 0,
+            "wrap_failures": 0,
+            "route_mismatches": 0
+          }
+        }
+      }
+    }
+  ]
+}

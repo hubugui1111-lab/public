@@ -10,6 +10,8 @@
 #include <chrono>
 #include <cstdint>
 #include <cstring>
+#include <dlfcn.h>
+#include <link.h>
 #include <fstream>
 #include <iostream>
 #include <map>
@@ -308,10 +310,40 @@ struct PreparedRouteGC222{
   }
 };
 
-FixArray native_relu(FPMath&math,const FixArray&x){
-  auto sign=math.fix->GE(x,uint64_t(0));
-  return math.fix->if_else(sign,x,uint64_t(0));
-}
+struct CheetahReluBackend {
+  using CreateFn=void*(*)(int,int,const char*,int);
+  using ApplyFn=int(*)(void*,const uint64_t*,uint64_t*,int,int,uint64_t*,double*);
+  using DestroyFn=void(*)(void*);
+  void* handle=nullptr;void* ctx=nullptr;
+  CreateFn create=nullptr;ApplyFn apply=nullptr;DestroyFn destroy=nullptr;
+  int party=0;
+
+  CheetahReluBackend(int party_,int base_port,const std::string&ip,
+                     const std::string&lib,int nthreads=4):party(party_){
+    handle=dlopen(lib.c_str(),RTLD_NOW|RTLD_LOCAL);
+    if(!handle)throw std::runtime_error(std::string("dlmopen Cheetah failed: ")+dlerror());
+    create=reinterpret_cast<CreateFn>(dlsym(handle,"cheetah_relu_create"));
+    apply=reinterpret_cast<ApplyFn>(dlsym(handle,"cheetah_relu_apply"));
+    destroy=reinterpret_cast<DestroyFn>(dlsym(handle,"cheetah_relu_destroy"));
+    if(!create||!apply||!destroy)throw std::runtime_error("Cheetah adapter symbols missing");
+    ctx=create(party,base_port,ip.c_str(),nthreads);
+    if(!ctx)throw std::runtime_error("Cheetah ReLU context setup failed");
+  }
+  ~CheetahReluBackend(){
+    if(ctx&&destroy)destroy(ctx);
+    if(handle)dlclose(handle);
+  }
+  Phase relu(const FixArray&x,FixArray&y){
+    y=FixArray(party,x.size,true,ELL,0);
+    uint64_t bytes=0;double inner_ms=0;
+    auto t0=Clock::now();
+    const int rc=apply(ctx,x.data,y.data,x.size,ELL,&bytes,&inner_ms);
+    auto t1=Clock::now();
+    if(rc)throw std::runtime_error("Cheetah ReLU apply failed");
+    const double wall_ms=std::chrono::duration<double,std::milli>(t1-t0).count();
+    return {bytes,0,wall_ms};
+  }
+};
 void print_phase(const char*name,int party,const Phase&p){
   std::cout<<"EXP227_PHASE party="<<party<<" name="<<name
            <<" bytes="<<p.bytes<<" rounds="<<p.rounds<<" ms="<<p.ms<<"\n";
@@ -768,12 +800,17 @@ BoolArray make_dummy_flags(FPMath&math,uint64_t need_share){
 }
 
 int main(int argc,char**argv){
-  int party=0,port=32000;std::string address="127.0.0.1",permfile,policyfile,zfile;
+  int party=0,port=32000,cheetah_port=0;
+  std::string address="127.0.0.1",permfile,policyfile,zfile;
+  std::string cheetah_lib="/home/lenovo/exp247-local/OpenCheetah/build/lib/libcheetah_relu_adapter.so";
   ArgMapping amap;amap.arg("r",party,"role");amap.arg("p",port,"port");amap.arg("ip",address,"ip");
-  amap.arg("permfile",permfile,"prepared additive permutation file");amap.arg("policy",policyfile,"frozen real policy");amap.arg("zfile",zfile,"real q20 z file");amap.parse(argc,argv);
+  amap.arg("permfile",permfile,"prepared additive permutation file");amap.arg("policy",policyfile,"frozen real policy");amap.arg("zfile",zfile,"real q20 z file");
+  amap.arg("cheetahlib",cheetah_lib,"OpenCheetah ReLU adapter");amap.arg("cheetahport",cheetah_port,"OpenCheetah base port");amap.parse(argc,argv);
   if((party!=ALICE&&party!=BOB)||permfile.empty())return 2;
   if(party==ALICE&&(policyfile.empty()||zfile.empty()))throw std::runtime_error("ALICE requires policy and zfile");
   IOPack io(party,port,address);OTPack ot(&io,party);FPMath math(party,&io,&ot);PRG128 rng;
+  if(cheetah_port==0)cheetah_port=port+1000;
+  auto cheetah_relu_ours=std::make_unique<CheetahReluBackend>(party,cheetah_port,address,cheetah_lib,4);
   RealPolicy252 policy; if(party==ALICE)policy=load_policy252(policyfile);
 
   // One-time-pad the leaf index. BOB will learn only masked_leaf=true_leaf XOR leaf_mask.
@@ -980,12 +1017,11 @@ int main(int argc,char**argv){
     });
 
     std::vector<uint32_t>shuffled_out(M,0);
-    ph_tail=measure(io,[&]{
-      FixArray tx(party,CAP,true,ELL,0);
-      for(int k=0;k<CAP;++k)tx.data[k]=shuffled[size_t(active[k])*2+1];
-      auto y=native_relu(math,tx);
-      for(int k=0;k<CAP;++k)shuffled_out[active[k]]=uint32_t(y.data[k])&RMASK;
-    });
+    FixArray tx(party,CAP,true,ELL,0);
+    for(int k=0;k<CAP;++k)tx.data[k]=shuffled[size_t(active[k])*2+1];
+    FixArray y;
+    ph_tail=cheetah_relu_ours->relu(tx,y);
+    for(int k=0;k<CAP;++k)shuffled_out[active[k]]=uint32_t(y.data[k])&RMASK;
 
     std::vector<uint32_t>back;
     ph_inverse=measure(io,[&]{
@@ -998,15 +1034,19 @@ int main(int argc,char**argv){
       for(int i=0;i<N;++i)final_out.data[i]=(known.data[i]+back[i])&MASK;
     });
   }else{
-    ph_overflow=measure(io,[&]{final_out=native_relu(math,z);});
+    ph_overflow=cheetah_relu_ours->relu(z,final_out);
   }
 
   flush_all(io);
-  const uint64_t total_bytes=io.get_comm()-tb0,total_rounds=io.get_rounds()-tr0;
+  const uint64_t cheetah_query_bytes=accepted?ph_tail.bytes:ph_overflow.bytes;
+  const uint64_t total_bytes=(io.get_comm()-tb0)+cheetah_query_bytes,total_rounds=io.get_rounds()-tr0;
   const double total_ms=std::chrono::duration<double,std::milli>(Clock::now()-tt0).count();
 
   io.io->sync();
-  FixArray baseline;auto ph_full=measure(io,[&]{baseline=native_relu(math,z);});
+  cheetah_relu_ours.reset();
+  auto cheetah_relu_full=std::make_unique<CheetahReluBackend>(party,cheetah_port+16,address,cheetah_lib,4);
+  FixArray baseline;auto ph_full=cheetah_relu_full->relu(z,baseline);
+  cheetah_relu_full.reset();
   auto pub_final=math.fix->output(PUBLIC,final_out);auto pub_full=math.fix->output(PUBLIC,baseline);
   auto pub_cert=math.bool_op->output(PUBLIC,cert);
   std::vector<uint64_t>probe_peer(INTERNAL),probe_open(INTERNAL);
@@ -1039,6 +1079,8 @@ int main(int argc,char**argv){
   for(int i=0;i<N;++i){
     cert_count+=pub_cert.data[i];mismatches+=((pub_final.data[i]&MASK)!=(pub_full.data[i]&MASK));
     if(party==ALICE){
+      const uint64_t expected_relu=uint64_t(std::max<int64_t>(z_int[i],0))&MASK;
+      mismatches+=int((pub_full.data[i]&MASK)!=expected_relu);
       uint64_t u=policy.bounds[size_t(expected_leaf)*N+i];
       bool pp=policy.signs[size_t(expected_leaf)*N+i]!=0;
       int64_t zc=z_int[i];
@@ -1067,9 +1109,9 @@ int main(int argc,char**argv){
   print_phase("kangaroo_plus_bool_beaver_certificate",party,ph_cert);
   print_phase("dual_share_local_count",party,ph_count);print_phase("kangaroo_accept_and_dummy",party,ph_dummy);
   print_phase("dabit_dummy_convert",party,ph_flags);print_phase("shuffle_forward_plus_open",party,ph_forward);
-  print_phase("native_tail_relu",party,ph_tail);print_phase("shuffle_inverse",party,ph_inverse);
-  print_phase("mixed_masked_merge",party,ph_merge);print_phase("overflow_full_relu",party,ph_overflow);
-  print_phase("full_relu_baseline",party,ph_full);
+  print_phase("cheetah_tail_relu",party,ph_tail);print_phase("shuffle_inverse",party,ph_inverse);
+  print_phase("mixed_masked_merge",party,ph_merge);print_phase("cheetah_overflow_full_relu",party,ph_overflow);
+  print_phase("cheetah_full_relu_baseline",party,ph_full);
   print_phase("private_probe_gather_preprocess",party,private_gather_pre.prep);
   print_phase("kcompare_certificate_preprocess",party,k_cert.phase);
   print_phase("kcompare_count_preprocess",party,k_count.phase);print_phase("bool_triple_preprocess",party,bool_triples.prep);print_phase("dummy_dabit_preprocess",party,dummy_dabit.prep);print_phase("mixed_merge_preprocess",party,merge_triple.prep);print_phase("route_gc_preprocess",party,ph_route_pre);
@@ -1084,7 +1126,7 @@ int main(int argc,char**argv){
            <<" opened_weight="<<opened_weight
            <<" total_bytes="<<total_bytes<<" total_rounds="<<total_rounds<<" total_ms="<<total_ms
            <<" shuffle_preprocess_bytes="<<ph_shuffle_pre.bytes<<" shuffle_preprocess_ms="<<ph_shuffle_pre.ms
-           <<" full_relu_bytes="<<ph_full.bytes<<" full_relu_rounds="<<ph_full.rounds<<" full_relu_ms="<<ph_full.ms
+           <<" relu_backend=OpenCheetah_a9b362e"<<" full_relu_bytes="<<ph_full.bytes<<" full_relu_rounds="<<ph_full.rounds<<" full_relu_ms="<<ph_full.ms
            <<" mismatches="<<mismatches<<"\n";
   return mismatches?3:0;
 }
