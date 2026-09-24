@@ -569,7 +569,7 @@ int main(int argc,char**argv){
     std::copy(lr.sign_shares.begin(),lr.sign_shares.end(),pred_pos.data);
   });
 
-  FixArray negz(party,N,true,ELL,0),twice_z(party,N,true,ELL,0),aligned;
+  FixArray negz(party,N,true,ELL,0),twice_z(party,N,true,ELL,0),aligned(party,N,true,ELL,0);
   for(int i=0;i<N;++i){negz.data[i]=(-z.data[i])&MASK;twice_z.data[i]=(2*z.data[i])&MASK;}
   auto ph_align=measure(io,[&]{
     auto pos_term=mixed_beaver_mux(io,party,pred_pos,twice_z,mux_align);
