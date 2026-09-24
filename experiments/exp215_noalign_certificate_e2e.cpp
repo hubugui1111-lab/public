@@ -488,7 +488,7 @@ int main(int argc,char**argv){
     cert_d[i]=(z.data[i]-one)&MASK;                         // z >= 1
     cert_d[N+i]=(bound.data[i]-z.data[i]-one)&MASK;       // z <= U-1
     cert_d[2*N+i]=((-z.data[i])&MASK)-one;                // z <= -1
-    cert_d[2*N+i]=(bound.data[i]+z.data[i]-one)&MASK;     // z >= -U+1
+    cert_d[3*N+i]=(bound.data[i]+z.data[i]-one)&MASK;     // z >= -U+1
     cert_d[2*N+i]&=MASK;cert_d[3*N+i]&=MASK;
   }
   BoolArray cert,safe_positive;
