@@ -39,7 +39,7 @@ class PreparedSharedLeafLookup16 {
   sci::PRG128& rng_;
   int n_,ell_;
   uint64_t mask_;
-  size_t payload_bytes_,sign_bytes_;
+  size_t sign_bytes_,payload_bytes_;
   std::vector<sci::block128> sender_seeds_;
   sci::block128 receiver_seed_{};
   uint8_t rho_=0;
