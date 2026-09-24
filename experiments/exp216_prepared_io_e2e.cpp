@@ -18,6 +18,7 @@
 #include <random>
 #include <sstream>
 #include <vector>
+#include <omp.h>
 
 using namespace sci;
 using namespace seal;
