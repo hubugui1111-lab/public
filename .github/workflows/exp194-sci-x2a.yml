@@ -22,7 +22,9 @@ jobs:
       - name: Clone EzPC SCI
         run: git clone --depth 1 https://github.com/mpc-msri/EzPC.git /tmp/EzPC
       - name: Patch legacy SEAL GCC compatibility
-        run: sed -i '1i #include <mutex>' /tmp/EzPC/SCI/extern/SEAL/native/src/seal/util/locks.h
+        run: |
+          git -C /tmp/EzPC submodule update --init --depth 1 SCI/extern/SEAL
+          sed -i '1i #include <mutex>' /tmp/EzPC/SCI/extern/SEAL/native/src/seal/util/locks.h
       - name: Install Exp194 source
         run: |
           cp experiments/exp194_sci_x2a_words.cpp /tmp/EzPC/SCI/tests/exp194_sci_x2a_words.cpp
