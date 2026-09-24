@@ -29,6 +29,8 @@ constexpr int KELL=56; constexpr uint64_t KMASK=(1ULL<<KELL)-1, ZETA=(1ULL<<26);
 constexpr uint64_t MASK=(1ULL<<ELL)-1;
 constexpr uint32_t RMASK=(1u<<ELL)-1;
 constexpr int TARGET_LEAF=11,A=2048,BOUND=2*A;
+constexpr uint64_t PROBE_ZETA=(1ULL<<31);
+constexpr int PROBE_INDEX_BITS=12;
 
 struct Phase{uint64_t bytes=0,rounds=0;double ms=0;};
 void flush_all(IOPack&io){io.io->flush();io.io_rev->flush();io.io_GC->flush();}
@@ -359,6 +361,153 @@ void share_alice_56(IOPack&io,int party,PRG128&rng,int n,
     io.io->send_data(peer.data(),n*8);io.io->flush();
   }else io.io->recv_data(local.data(),n*8);
 }
+// ---- True private 15-probe extraction + 64-bit Kangaroo blinding -----------
+// ALICE owns model-private probe coordinates; BOB must not learn them.
+// Each probe uses 12 binary OTs to obtain one key per index bit. BOB then
+// one-time-pads every candidate share under the corresponding 12-key pad.
+// ALICE can decrypt exactly the chosen entry; the selected value remains
+// additively shared in Z_2^64 and is never reconstructed here.
+uint64_t probe_pad(const std::vector<block128>&k0,
+                   const std::vector<block128>&k1,
+                   int query,uint32_t index){
+  block128 seed=toBlock((uint64_t(query+1)<<32)|uint64_t(index));
+  const int base=query*PROBE_INDEX_BITS;
+  for(int bit=0;bit<PROBE_INDEX_BITS;++bit)
+    seed=xorBlocks(seed,((index>>bit)&1U)?k1[base+bit]:k0[base+bit]);
+  PRG128 g;g.reseed(&seed);
+  uint64_t pad=0;g.random_data(&pad,sizeof(pad));return pad;
+}
+uint64_t probe_pad_selected(const std::vector<block128>&selected,
+                            int query,uint32_t index){
+  block128 seed=toBlock((uint64_t(query+1)<<32)|uint64_t(index));
+  const int base=query*PROBE_INDEX_BITS;
+  for(int bit=0;bit<PROBE_INDEX_BITS;++bit)
+    seed=xorBlocks(seed,selected[base+bit]);
+  PRG128 g;g.reseed(&seed);
+  uint64_t pad=0;g.random_data(&pad,sizeof(pad));return pad;
+}
+std::vector<uint64_t> private_probe_gather64(
+    IOPack&io,OTPack&ot,int party,PRG128&rng,
+    const std::vector<uint64_t>&z64_share,
+    const std::array<uint16_t,INTERNAL>&probe_index){
+  if(int(z64_share.size())!=N)throw std::runtime_error("probe gather input size");
+  constexpr int OTN=INTERNAL*PROBE_INDEX_BITS;
+  std::vector<uint64_t>out(INTERNAL);
+
+  if(party==BOB){
+    std::vector<block128>k0(OTN),k1(OTN);
+    rng.random_block(k0.data(),OTN);rng.random_block(k1.data(),OTN);
+    // iknp_reversed makes BOB the OT sender and ALICE the receiver.
+    ot.iknp_reversed->send(k0.data(),k1.data(),OTN);
+
+    std::vector<uint64_t>mask(INTERNAL),cipher(size_t(INTERNAL)*N);
+    rng.random_data(mask.data(),size_t(INTERNAL)*sizeof(uint64_t));
+    for(int q=0;q<INTERNAL;++q){
+      out[q]=mask[q];
+      for(uint32_t i=0;i<uint32_t(N);++i){
+        const uint64_t msg=z64_share[i]-mask[q];
+        cipher[size_t(q)*N+i]=msg^probe_pad(k0,k1,q,i);
+      }
+    }
+    io.io_rev->send_data(cipher.data(),int(cipher.size()*sizeof(uint64_t)));
+    io.io_rev->flush();
+  }else{
+    std::unique_ptr<bool[]>choice(new bool[OTN]);
+    for(int q=0;q<INTERNAL;++q){
+      if(probe_index[q]>=N)throw std::runtime_error("private probe index");
+      for(int bit=0;bit<PROBE_INDEX_BITS;++bit)
+        choice[q*PROBE_INDEX_BITS+bit]=((probe_index[q]>>bit)&1U)!=0;
+    }
+    std::vector<block128>selected(OTN);
+    ot.iknp_reversed->recv(selected.data(),choice.get(),OTN);
+
+    std::vector<uint64_t>cipher(size_t(INTERNAL)*N);
+    io.io_rev->recv_data(cipher.data(),int(cipher.size()*sizeof(uint64_t)));
+    for(int q=0;q<INTERNAL;++q){
+      const uint32_t idx=probe_index[q];
+      const uint64_t masked=cipher[size_t(q)*N+idx]^probe_pad_selected(selected,q,idx);
+      out[q]=z64_share[idx]+masked;
+    }
+  }
+  return out;
+}
+
+// Additive-share adaptation of Kangaroo PackObliviousCom for the 15 probes.
+// ALICE samples A,B,R exactly under the paper condition
+//   zeta > A > B > 0, R in {+1,-1},
+// with zeta=2^31 for q=2^64.  A*d_B is shared by 64-bit COT; ALICE adds
+// A*d_A+B locally.  BOB sees only V=R(A*d+B), returns a fresh XOR-masked
+// sign bit, and ALICE removes R.  Public contract: |d| < zeta.
+BoolArray kangaroo_ge0_probe64(IOPack&io,OTPack&ot,int party,PRG128&rng,
+                               const std::vector<uint64_t>&dshare,
+                               int* regression_wrap_failures=nullptr){
+  const int n=int(dshare.size());
+  if(n!=INTERNAL)throw std::runtime_error("probe64 size");
+  constexpr int BITS=64;
+  const int ot_count=n*BITS;
+  BoolArray result(party,n);
+
+  if(party==ALICE){
+    std::vector<uint64_t>raw(size_t(3)*n);
+    rng.random_data(raw.data(),raw.size()*sizeof(uint64_t));
+    std::vector<uint64_t>alpha(n),beta(n);
+    std::vector<uint8_t>flip(n);
+    for(int i=0;i<n;++i){
+      const uint64_t aa=2+(raw[3*i]%(PROBE_ZETA-2));   // 2 .. zeta-1
+      const uint64_t bb=1+(raw[3*i+1]%(aa-1));         // 1 .. A-1
+      const bool neg=(raw[3*i+2]&1U)!=0;
+      if(regression_wrap_failures){
+        if(!(PROBE_ZETA>aa&&aa>bb&&bb>0))++*regression_wrap_failures;
+        for(const int64_t edge:{-int64_t(PROBE_ZETA-1),int64_t(PROBE_ZETA-1)}){
+          __int128 v=__int128(aa)*edge+__int128(bb);
+          if(v<0)v=-v;
+          if(v>=(__int128(1)<<63))++*regression_wrap_failures;
+        }
+      }
+      flip[i]=uint8_t(neg);
+      alpha[i]=neg?(0ULL-aa):aa;
+      beta[i]=neg?(0ULL-bb):bb;
+    }
+
+    std::vector<uint64_t>corr(ot_count),sent(ot_count);
+    for(int i=0;i<n;++i)for(int bit=0;bit<BITS;++bit)
+      corr[i*BITS+bit]=alpha[i]<<bit;
+    ot.iknp_straight->send_cot(sent.data(),corr.data(),ot_count,BITS);
+
+    std::vector<uint64_t>tshare(n);
+    for(int i=0;i<n;++i){
+      uint64_t cross=0;
+      for(int bit=0;bit<BITS;++bit)cross+=sent[i*BITS+bit];
+      tshare[i]=alpha[i]*dshare[i]+beta[i]-cross;
+    }
+    io.io->send_data(tshare.data(),n*sizeof(uint64_t));io.io->flush();
+    std::vector<uint8_t>masked(n);io.io->recv_data(masked.data(),n);
+    for(int i=0;i<n;++i)result.data[i]=uint8_t(masked[i]^flip[i]);
+  }else{
+    std::unique_ptr<bool[]>choice(new bool[ot_count]);
+    for(int i=0;i<n;++i)for(int bit=0;bit<BITS;++bit)
+      choice[i*BITS+bit]=((dshare[i]>>bit)&1U)!=0;
+    std::vector<uint64_t>received(ot_count);
+    ot.iknp_straight->recv_cot(received.data(),choice.get(),ot_count,BITS);
+
+    std::vector<uint64_t>server(n);io.io->recv_data(server.data(),n*sizeof(uint64_t));
+    std::vector<uint64_t>rand(n);rng.random_data(rand.data(),n*sizeof(uint64_t));
+    std::vector<uint8_t>masked(n);
+    for(int i=0;i<n;++i){
+      uint64_t cross=0;
+      for(int bit=0;bit<BITS;++bit)cross+=received[i*BITS+bit];
+      const uint64_t v=server[i]+cross;
+      const uint8_t blinded=uint8_t((v>>63)==0);
+      const uint8_t local=uint8_t(rand[i]&1U);
+      masked[i]=uint8_t(blinded^local);
+      result.data[i]=local;
+    }
+    io.io->send_data(masked.data(),n);io.io->flush();
+  }
+  return result;
+}
+
+
 struct PrivateGather252{
   SplitKKOT<NetIO> rev16,rev256;
   Phase prep;
@@ -715,9 +864,7 @@ int main(int argc,char**argv){
 
   // Fresh one-use preprocessing for all auxiliary order predicates introduced
   // by our screening protocol. Native fallback ReLU is deliberately excluded.
-  auto k_probe=prepare_kcompare56(math,io,party,rng,INTERNAL);
   auto k_cert=prepare_kcompare56(math,io,party,rng,4*N);
-  PrivateGather252 private_gather_pre(party,io);
   auto k_count=prepare_kcompare(math,io,party,rng,CAP+1);
   auto bool_triples=prepare_bool_triples_dual(math,io,ot,party,4*N);
   auto dummy_dabit=prepare_dabit(math,io,rng,party,CAP);
@@ -735,7 +882,7 @@ int main(int argc,char**argv){
   Phase ph_shuffle_setup{},ph_shuffle_pre{};
 
   // Real Q20 input, shared in the original 24-bit movement ring and in a 56-bit compare ring.
-  std::vector<uint64_t>z_local(N),z_peer(N),z_clear(N),z56_local,z56_clear(N);
+  std::vector<uint64_t>z_local(N),z_peer(N),z_clear(N),z56_local,z56_clear(N),z64_local(N),z64_peer(N);
   std::vector<int64_t>z_int;
   if(party==ALICE){
     z_int=load_z252(zfile);
@@ -749,6 +896,11 @@ int main(int argc,char**argv){
     io.io->send_data(z_peer.data(),N*8);io.io->flush();
   }else io.io->recv_data(z_local.data(),N*8);
   share_alice_56(io,party,rng,N,z56_clear,z56_local);
+  if(party==ALICE){
+    rng.random_data(z64_local.data(),size_t(N)*sizeof(uint64_t));
+    for(int i=0;i<N;++i)z64_peer[i]=uint64_t(z_int[i])-z64_local[i];
+    io.io->send_data(z64_peer.data(),N*sizeof(uint64_t));io.io->flush();
+  }else io.io->recv_data(z64_local.data(),N*sizeof(uint64_t));
   FixArray z(party,N,true,ELL,0);std::copy(z_local.begin(),z_local.end(),z.data);
 
   // Single synchronization outside the measured online region.
@@ -757,12 +909,22 @@ int main(int argc,char**argv){
 
   std::array<uint16_t,INTERNAL>probe_idx{};
   if(party==ALICE)probe_idx=policy.probes;
-  std::vector<uint64_t>probe_d;
-  BoolArray probe_sign;
+  std::vector<uint64_t>probe_d64;
+  BoolArray probe_cmp,probe_sign;int probe_wrap_failures=0;
+  auto ph_probe_gather=measure(io,[&]{
+    probe_d64=private_probe_gather64(io,ot,party,rng,z64_local,probe_idx);
+  });
   auto ph_probe=measure(io,[&]{
-    probe_d=private_gather252(io,party,rng,private_gather_pre,probe_idx,z56_local);
-    if(party==ALICE)for(auto&v:probe_d)v=(v-1)&KMASK; // frozen tree uses z>0
-    probe_sign=kangaroo_ge0_56(io,party,rng,k_probe,probe_d); probe_sign=math.bool_op->NOT(probe_sign); // frozen tree: positive -> child 0
+    if(party==ALICE){
+      for(int j=0;j<INTERNAL;++j){
+        const int64_t d=z_int[probe_idx[j]]-1;
+        if(d<=-int64_t(PROBE_ZETA)||d>=int64_t(PROBE_ZETA))
+          throw std::runtime_error("real probe exceeds Kangaroo zeta");
+        probe_d64[j]-=1;
+      }
+    }
+    probe_cmp=kangaroo_ge0_probe64(io,ot,party,rng,probe_d64,&probe_wrap_failures);
+    probe_sign=math.bool_op->NOT(probe_cmp);
   });
   uint8_t masked_leaf=0;
   auto ph_route=measure(io,[&]{masked_leaf=prepared_route->run(probe_sign,leaf_mask);});
@@ -916,7 +1078,24 @@ int main(int argc,char**argv){
   FixArray baseline;auto ph_full=measure(io,[&]{baseline=native_relu(math,z);});
   auto pub_final=math.fix->output(PUBLIC,final_out);auto pub_full=math.fix->output(PUBLIC,baseline);
   auto pub_cert=math.bool_op->output(PUBLIC,cert);
-  int mismatches=0,cert_count=0,expected_cert=0,expected_leaf=-1;
+  std::vector<uint64_t>probe_peer(INTERNAL),probe_open(INTERNAL);
+  if(party==ALICE){
+    io.io->send_data(probe_d64.data(),INTERNAL*sizeof(uint64_t));io.io->flush();
+    io.io->recv_data(probe_peer.data(),INTERNAL*sizeof(uint64_t));
+  }else{
+    io.io->recv_data(probe_peer.data(),INTERNAL*sizeof(uint64_t));
+    io.io->send_data(probe_d64.data(),INTERNAL*sizeof(uint64_t));io.io->flush();
+  }
+  for(int j=0;j<INTERNAL;++j)probe_open[j]=probe_d64[j]+probe_peer[j];
+  auto pub_probe_cmp=math.bool_op->output(PUBLIC,probe_cmp);
+  int probe_gather_mismatches=0,probe_compare_mismatches=0;
+  if(party==ALICE)for(int j=0;j<INTERNAL;++j){
+    const int64_t d=z_int[probe_idx[j]]-1;
+    probe_gather_mismatches+=int(probe_open[j]!=uint64_t(d));
+    probe_compare_mismatches+=int(bool(pub_probe_cmp.data[j])!=(d>=0));
+  }
+  int mismatches=probe_gather_mismatches+probe_compare_mismatches+probe_wrap_failures;
+  int cert_count=0,expected_cert=0,expected_leaf=-1;
   if(party==ALICE){
     int heap=0,leaf=0;
     for(int d=0;d<DEPTH;++d){
@@ -937,15 +1116,22 @@ int main(int argc,char**argv){
     }
   }
   // Test-only route check after the measured online region.
-  uint8_t opened_masked_leaf=0;
+  uint8_t opened_masked_leaf=0;int probe_route_mismatches=0;
   if(party==BOB){io.io->send_data(&masked_leaf,1);io.io->flush();}
   else{
     io.io->recv_data(&opened_masked_leaf,1);
-    mismatches+=int(((opened_masked_leaf^leaf_mask)&15)!=expected_leaf);
+    probe_route_mismatches=int(((opened_masked_leaf^leaf_mask)&15)!=expected_leaf);
+    mismatches+=probe_route_mismatches;
   }
   if(accepted)mismatches+=(opened_weight!=CAP);
+  std::cout<<"EXP252_PROBE15_REGRESSION party="<<party
+           <<" gather_mismatches="<<probe_gather_mismatches
+           <<" compare_mismatches="<<probe_compare_mismatches
+           <<" wrap_failures="<<probe_wrap_failures
+           <<" route_mismatches="<<probe_route_mismatches<<"\n";
 
-  print_phase("probe15",party,ph_probe);print_phase("masked_leaf_gc_route",party,ph_route);
+  print_phase("probe15_private_ot_gather",party,ph_probe_gather);
+  print_phase("probe15_kangaroo64",party,ph_probe);print_phase("masked_leaf_gc_route",party,ph_route);
   print_phase("leaf_param_lookup",party,ph_leaf);print_phase("certificate_align_removed",party,ph_align);
   print_phase("kangaroo_plus_bool_beaver_certificate",party,ph_cert);
   print_phase("dual_share_local_count",party,ph_count);print_phase("kangaroo_accept_and_dummy",party,ph_dummy);
@@ -953,8 +1139,6 @@ int main(int argc,char**argv){
   print_phase("native_tail_relu",party,ph_tail);print_phase("shuffle_inverse",party,ph_inverse);
   print_phase("mixed_masked_merge",party,ph_merge);print_phase("overflow_full_relu",party,ph_overflow);
   print_phase("full_relu_baseline",party,ph_full);
-  print_phase("private_probe_gather_preprocess",party,private_gather_pre.prep);
-  print_phase("kcompare_probe_preprocess",party,k_probe.phase);
   print_phase("kcompare_certificate_preprocess",party,k_cert.phase);
   print_phase("kcompare_count_preprocess",party,k_count.phase);print_phase("bool_triple_preprocess",party,bool_triples.prep);print_phase("dummy_dabit_preprocess",party,dummy_dabit.prep);print_phase("mixed_merge_preprocess",party,merge_triple.prep);print_phase("route_gc_preprocess",party,ph_route_pre);
   print_phase("shuffle_setup",party,ph_shuffle_setup);print_phase("shuffle_preprocess",party,ph_shuffle_pre);

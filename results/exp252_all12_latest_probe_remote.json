@@ -1,0 +1,399 @@
+{
+  "experiment": "Exp252 all-12-layer latest private probe chain remote rerun",
+  "layers": [
+    {
+      "layer": 0,
+      "regression": {
+        "party": 1,
+        "gather_mismatches": 0,
+        "compare_mismatches": 0,
+        "wrap_failures": 0,
+        "route_mismatches": 0
+      },
+      "result": {
+        "party": 1,
+        "N": 3072,
+        "capacity": 320,
+        "accepted": 1,
+        "cert_count": 3022,
+        "expected_cert": 3022,
+        "cert_fraction": 0.983724,
+        "movement_conceptual_rounds": 5,
+        "movement_iopack_rounds": 3,
+        "movement_bytes": 54272,
+        "opened_weight": 320,
+        "total_bytes": 790797,
+        "total_rounds": 30,
+        "total_ms": 33.0833,
+        "shuffle_preprocess_bytes": 0,
+        "shuffle_preprocess_ms": 0,
+        "full_relu_bytes": 180480,
+        "full_relu_rounds": 5,
+        "full_relu_ms": 11.092,
+        "mismatches": 0
+      }
+    },
+    {
+      "layer": 1,
+      "regression": {
+        "party": 1,
+        "gather_mismatches": 0,
+        "compare_mismatches": 0,
+        "wrap_failures": 0,
+        "route_mismatches": 0
+      },
+      "result": {
+        "party": 1,
+        "N": 3072,
+        "capacity": 320,
+        "accepted": 1,
+        "cert_count": 3023,
+        "expected_cert": 3023,
+        "cert_fraction": 0.984049,
+        "movement_conceptual_rounds": 5,
+        "movement_iopack_rounds": 3,
+        "movement_bytes": 54272,
+        "opened_weight": 320,
+        "total_bytes": 790797,
+        "total_rounds": 30,
+        "total_ms": 34.9192,
+        "shuffle_preprocess_bytes": 0,
+        "shuffle_preprocess_ms": 0,
+        "full_relu_bytes": 180480,
+        "full_relu_rounds": 5,
+        "full_relu_ms": 10.5115,
+        "mismatches": 0
+      }
+    },
+    {
+      "layer": 2,
+      "regression": {
+        "party": 1,
+        "gather_mismatches": 0,
+        "compare_mismatches": 0,
+        "wrap_failures": 0,
+        "route_mismatches": 0
+      },
+      "result": {
+        "party": 1,
+        "N": 3072,
+        "capacity": 320,
+        "accepted": 1,
+        "cert_count": 3038,
+        "expected_cert": 3038,
+        "cert_fraction": 0.988932,
+        "movement_conceptual_rounds": 5,
+        "movement_iopack_rounds": 3,
+        "movement_bytes": 54272,
+        "opened_weight": 320,
+        "total_bytes": 790797,
+        "total_rounds": 30,
+        "total_ms": 33.9777,
+        "shuffle_preprocess_bytes": 0,
+        "shuffle_preprocess_ms": 0,
+        "full_relu_bytes": 180480,
+        "full_relu_rounds": 5,
+        "full_relu_ms": 10.2819,
+        "mismatches": 0
+      }
+    },
+    {
+      "layer": 3,
+      "regression": {
+        "party": 1,
+        "gather_mismatches": 0,
+        "compare_mismatches": 0,
+        "wrap_failures": 0,
+        "route_mismatches": 0
+      },
+      "result": {
+        "party": 1,
+        "N": 3072,
+        "capacity": 320,
+        "accepted": 1,
+        "cert_count": 3044,
+        "expected_cert": 3044,
+        "cert_fraction": 0.990885,
+        "movement_conceptual_rounds": 5,
+        "movement_iopack_rounds": 3,
+        "movement_bytes": 54272,
+        "opened_weight": 320,
+        "total_bytes": 790797,
+        "total_rounds": 30,
+        "total_ms": 34.3292,
+        "shuffle_preprocess_bytes": 0,
+        "shuffle_preprocess_ms": 0,
+        "full_relu_bytes": 180480,
+        "full_relu_rounds": 5,
+        "full_relu_ms": 10.1298,
+        "mismatches": 0
+      }
+    },
+    {
+      "layer": 4,
+      "regression": {
+        "party": 1,
+        "gather_mismatches": 0,
+        "compare_mismatches": 0,
+        "wrap_failures": 0,
+        "route_mismatches": 0
+      },
+      "result": {
+        "party": 1,
+        "N": 3072,
+        "capacity": 320,
+        "accepted": 1,
+        "cert_count": 2980,
+        "expected_cert": 2980,
+        "cert_fraction": 0.970052,
+        "movement_conceptual_rounds": 5,
+        "movement_iopack_rounds": 3,
+        "movement_bytes": 54272,
+        "opened_weight": 320,
+        "total_bytes": 790797,
+        "total_rounds": 30,
+        "total_ms": 35.98,
+        "shuffle_preprocess_bytes": 0,
+        "shuffle_preprocess_ms": 0,
+        "full_relu_bytes": 180480,
+        "full_relu_rounds": 5,
+        "full_relu_ms": 10.5891,
+        "mismatches": 0
+      }
+    },
+    {
+      "layer": 5,
+      "regression": {
+        "party": 1,
+        "gather_mismatches": 0,
+        "compare_mismatches": 0,
+        "wrap_failures": 0,
+        "route_mismatches": 0
+      },
+      "result": {
+        "party": 1,
+        "N": 3072,
+        "capacity": 320,
+        "accepted": 1,
+        "cert_count": 2904,
+        "expected_cert": 2904,
+        "cert_fraction": 0.945312,
+        "movement_conceptual_rounds": 5,
+        "movement_iopack_rounds": 3,
+        "movement_bytes": 54272,
+        "opened_weight": 320,
+        "total_bytes": 790797,
+        "total_rounds": 30,
+        "total_ms": 33.6281,
+        "shuffle_preprocess_bytes": 0,
+        "shuffle_preprocess_ms": 0,
+        "full_relu_bytes": 180480,
+        "full_relu_rounds": 5,
+        "full_relu_ms": 10.4716,
+        "mismatches": 0
+      }
+    },
+    {
+      "layer": 6,
+      "regression": {
+        "party": 1,
+        "gather_mismatches": 0,
+        "compare_mismatches": 0,
+        "wrap_failures": 0,
+        "route_mismatches": 0
+      },
+      "result": {
+        "party": 1,
+        "N": 3072,
+        "capacity": 320,
+        "accepted": 1,
+        "cert_count": 2857,
+        "expected_cert": 2857,
+        "cert_fraction": 0.930013,
+        "movement_conceptual_rounds": 5,
+        "movement_iopack_rounds": 3,
+        "movement_bytes": 54272,
+        "opened_weight": 320,
+        "total_bytes": 790797,
+        "total_rounds": 30,
+        "total_ms": 35.7995,
+        "shuffle_preprocess_bytes": 0,
+        "shuffle_preprocess_ms": 0,
+        "full_relu_bytes": 180480,
+        "full_relu_rounds": 5,
+        "full_relu_ms": 10.1821,
+        "mismatches": 0
+      }
+    },
+    {
+      "layer": 7,
+      "regression": {
+        "party": 1,
+        "gather_mismatches": 0,
+        "compare_mismatches": 0,
+        "wrap_failures": 0,
+        "route_mismatches": 0
+      },
+      "result": {
+        "party": 1,
+        "N": 3072,
+        "capacity": 320,
+        "accepted": 1,
+        "cert_count": 2871,
+        "expected_cert": 2871,
+        "cert_fraction": 0.93457,
+        "movement_conceptual_rounds": 5,
+        "movement_iopack_rounds": 3,
+        "movement_bytes": 54272,
+        "opened_weight": 320,
+        "total_bytes": 790797,
+        "total_rounds": 30,
+        "total_ms": 34.402,
+        "shuffle_preprocess_bytes": 0,
+        "shuffle_preprocess_ms": 0,
+        "full_relu_bytes": 180480,
+        "full_relu_rounds": 5,
+        "full_relu_ms": 10.7956,
+        "mismatches": 0
+      }
+    },
+    {
+      "layer": 8,
+      "regression": {
+        "party": 1,
+        "gather_mismatches": 0,
+        "compare_mismatches": 0,
+        "wrap_failures": 0,
+        "route_mismatches": 0
+      },
+      "result": {
+        "party": 1,
+        "N": 3072,
+        "capacity": 320,
+        "accepted": 1,
+        "cert_count": 2852,
+        "expected_cert": 2852,
+        "cert_fraction": 0.928385,
+        "movement_conceptual_rounds": 5,
+        "movement_iopack_rounds": 3,
+        "movement_bytes": 54272,
+        "opened_weight": 320,
+        "total_bytes": 790797,
+        "total_rounds": 30,
+        "total_ms": 34.6251,
+        "shuffle_preprocess_bytes": 0,
+        "shuffle_preprocess_ms": 0,
+        "full_relu_bytes": 180480,
+        "full_relu_rounds": 5,
+        "full_relu_ms": 11.3302,
+        "mismatches": 0
+      }
+    },
+    {
+      "layer": 9,
+      "regression": {
+        "party": 1,
+        "gather_mismatches": 0,
+        "compare_mismatches": 0,
+        "wrap_failures": 0,
+        "route_mismatches": 0
+      },
+      "result": {
+        "party": 1,
+        "N": 3072,
+        "capacity": 320,
+        "accepted": 1,
+        "cert_count": 2822,
+        "expected_cert": 2822,
+        "cert_fraction": 0.91862,
+        "movement_conceptual_rounds": 5,
+        "movement_iopack_rounds": 3,
+        "movement_bytes": 54272,
+        "opened_weight": 320,
+        "total_bytes": 790797,
+        "total_rounds": 30,
+        "total_ms": 33.8253,
+        "shuffle_preprocess_bytes": 0,
+        "shuffle_preprocess_ms": 0,
+        "full_relu_bytes": 180480,
+        "full_relu_rounds": 5,
+        "full_relu_ms": 10.2577,
+        "mismatches": 0
+      }
+    },
+    {
+      "layer": 10,
+      "regression": {
+        "party": 1,
+        "gather_mismatches": 0,
+        "compare_mismatches": 0,
+        "wrap_failures": 0,
+        "route_mismatches": 0
+      },
+      "result": {
+        "party": 1,
+        "N": 3072,
+        "capacity": 320,
+        "accepted": 0,
+        "cert_count": 2731,
+        "expected_cert": 2731,
+        "cert_fraction": 0.888997,
+        "movement_conceptual_rounds": 5,
+        "movement_iopack_rounds": 0,
+        "movement_bytes": 0,
+        "opened_weight": 0,
+        "total_bytes": 870133,
+        "total_rounds": 23,
+        "total_ms": 42.8323,
+        "shuffle_preprocess_bytes": 0,
+        "shuffle_preprocess_ms": 0,
+        "full_relu_bytes": 180480,
+        "full_relu_rounds": 5,
+        "full_relu_ms": 10.5793,
+        "mismatches": 0
+      }
+    },
+    {
+      "layer": 11,
+      "regression": {
+        "party": 1,
+        "gather_mismatches": 0,
+        "compare_mismatches": 0,
+        "wrap_failures": 0,
+        "route_mismatches": 0
+      },
+      "result": {
+        "party": 1,
+        "N": 3072,
+        "capacity": 320,
+        "accepted": 1,
+        "cert_count": 2796,
+        "expected_cert": 2796,
+        "cert_fraction": 0.910156,
+        "movement_conceptual_rounds": 5,
+        "movement_iopack_rounds": 3,
+        "movement_bytes": 54272,
+        "opened_weight": 320,
+        "total_bytes": 790797,
+        "total_rounds": 30,
+        "total_ms": 35.4859,
+        "shuffle_preprocess_bytes": 0,
+        "shuffle_preprocess_ms": 0,
+        "full_relu_bytes": 180480,
+        "full_relu_rounds": 5,
+        "full_relu_ms": 10.3744,
+        "mismatches": 0
+      }
+    }
+  ],
+  "aggregate": {
+    "certified": 34940,
+    "total_relu": 36864,
+    "cert_fraction": 0.9478081597222222,
+    "accepted_layers": 11,
+    "all_mismatches_zero": true,
+    "all_probe_regressions_zero": true,
+    "mean_total_ms": 35.240633333333335,
+    "mean_full_relu_ms": 10.5496
+  }
+}
