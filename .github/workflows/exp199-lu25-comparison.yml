@@ -24,26 +24,17 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p /tmp/lu25
-          python3 - <<'PY'
-          import urllib.request
-          urls=[
-            "https://zenodo.org/records/17217396/files/2PC_eq_cmp-main.zip?download=1",
-            "https://zenodo.org/records/14580231/files/2PC_eq_cmp-main.zip?download=1",
-          ]
-          last=None
-          for u in urls:
-              try:
-                  req=urllib.request.Request(u,headers={"User-Agent":"Mozilla/5.0"})
-                  with urllib.request.urlopen(req,timeout=60) as r, open("/tmp/lu25.zip","wb") as f:
-                      f.write(r.read())
-                  print("downloaded",u)
-                  break
-              except Exception as e:
-                  print("failed",u,e)
-                  last=e
-          else:
-              raise last
-          PY
+          set -euo pipefail
+          for u in \
+            "https://zenodo.org/api/records/17217396/files/2PC_eq_cmp-main.zip/content" \
+            "https://zenodo.org/api/records/14580231/files/2PC_eq_cmp-main.zip/content"; do
+            echo "trying $u"
+            if curl -fL --retry 3 --retry-delay 2 -A "Mozilla/5.0" -o /tmp/lu25.zip "$u"; then
+              unzip -t /tmp/lu25.zip
+              break
+            fi
+          done
+          test -s /tmp/lu25.zip
           unzip -q /tmp/lu25.zip -d /tmp/lu25
           find /tmp/lu25 -maxdepth 3 -type f -print | sort | head -200
 
