@@ -247,7 +247,7 @@ int main(int argc,char**argv){
       mismatches += (bool(pub_cert.data[i])!=c);
       const uint64_t exp_pred=c ? (pp?z_clear[i]:0) : (pp?z_clear[i]:0);
       (void)exp_pred;
-      const uint64_t exp_pz=pp?z_clear[i]:0;
+      const uint64_t exp_pz=pp?enc_signed(zc,QELL):0;
       mismatches += ((pub_predz.data[i]&QMASK)!=(exp_pz&QMASK));
       const uint64_t exp_relu=zc>0?z_clear[i]:0;
       mismatches += ((pub_full.data[i]&MASK)!=(exp_relu&MASK));
