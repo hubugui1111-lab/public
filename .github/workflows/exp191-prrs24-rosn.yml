@@ -1,0 +1,85 @@
+name: Exp191 PRRS24 ROSN movement benchmark
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - 'experiments/Exp191Prrs24RosnBenchTest.java'
+      - '.github/workflows/exp191-prrs24-rosn.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  exp191:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare
+        run: mkdir -p "$GITHUB_WORKSPACE/results"
+
+      - name: Clone MPC4J
+        run: git clone --depth 1 https://github.com/alibaba-edu/mpc4j.git /tmp/mpc4j
+
+      - name: Install benchmark test
+        run: |
+          cp experiments/Exp191Prrs24RosnBenchTest.java             /tmp/mpc4j/mpc4j-s2pc-aby/src/test/java/edu/alibaba/mpc4j/s2pc/aby/pcg/osn/rosn/Exp191Prrs24RosnBenchTest.java
+
+      - name: Run Exp191
+        working-directory: /tmp/mpc4j
+        shell: bash
+        run: |
+          set -euo pipefail
+          mvn -q -pl mpc4j-s2pc-aby -am             -Dtest=Exp191Prrs24RosnBenchTest             -Dsurefire.failIfNoSpecifiedTests=false             test | tee "$GITHUB_WORKSPACE/results/exp191.log"
+
+      - name: Parse
+        run: |
+          python3 - <<'PY'
+          import json, pathlib
+          rows=[]
+          for line in pathlib.Path("results/exp191.log").read_text().splitlines():
+              if "EXP191_RESULT " not in line:
+                  continue
+              line=line.split("EXP191_RESULT ",1)[1]
+              row={}
+              for tok in line.split():
+                  k,v=tok.split("=",1)
+                  try: row[k]=int(v)
+                  except ValueError: row[k]=v
+              rows.append(row)
+          if len(rows)!=8:
+              raise SystemExit(f"expected 8 rows, got {len(rows)}")
+          by={}
+          for r in rows: by[(r["mode"],r["num"],r["byte_length"])]=r
+          estimates=[]
+          for mode in ["SVODE","SCOT"]:
+              for num in [3392,3712]:
+                  r7=by[(mode,num,7)]
+                  r6=by[(mode,num,6)]
+                  estimates.append({
+                    "mode":mode,"num":num,
+                    "four_rosn_preprocess_bytes":2*r7["total_bytes"]+2*r6["total_bytes"],
+                    "four_rosn_packets":2*r7["total_packets"]+2*r6["total_packets"],
+                  })
+          report={
+            "experiment":"Exp191 PRRS24 ROSN movement preprocessing",
+            "interpretation":"two forward permutation shares need 2x7B ROSN; inverse needs 2x6B ROSN",
+            "old_tail_prepare_bytes_B320":2965506,
+            "altmod_exp187_preprocess_bytes_B320":6014396,
+            "rows":rows,
+            "four_rosn_estimates":estimates,
+          }
+          pathlib.Path("results/exp191_prrs24_rosn.json").write_text(json.dumps(report,indent=2))
+          print(json.dumps(report,indent=2))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: exp191-prrs24-rosn
+          path: |
+            results/exp191.log
+            results/exp191_prrs24_rosn.json
+          if-no-files-found: error
