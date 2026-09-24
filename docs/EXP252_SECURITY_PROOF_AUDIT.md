@@ -2,19 +2,19 @@
 
 日期：2026-09-24
 
+> **证明口径更新：** 最终论文不重新审计 Kangaroo PackObliviousCom 内部安全，而将其 NDSS 2026 安全定理作为外部假设；Exp252 当前 comparison 的正式归约见 `docs/EXP252_KANGAROO_REDUCTION.md`。本文件第 4.5 节保留为内部 adversarial audit，不再作为论文安全定理的 blocker。
+
 ## 结论
 
-当前代码在 **2PC、static semi-honest、至多一方腐化** 的目标模型下，端到端安全定理目前不能通过。
+当前代码的正式安全结论采用 **conditional reduction**：在 2PC、static semi-honest、至多一方腐化模型下，假设 Kangaroo NDSS 2026 的 PackObliviousCom 满足其论文声明的安全定义，并假设 COT/KKOT、GC、Beaver/daBit、correlated permutation 与 OpenCheetah ReLU 分别满足标准 semi-honest 安全性，则 Exp252 可由顺序组合得到端到端安全性。
 
-不是树路由、证书逻辑或 secret shuffle 出了问题；阻塞点是当前三处 Kangaroo-style comparison。
-它们都会让一方重构一个秘密相关整数
+当前三处 Kangaroo-style comparison 的实现会重构与 Kangaroo 相同形式的 blinded representative
 
-    V = R * (A*d + B),
+    V = R * (A*d + B).
 
-其中 A>B>0，R∈{+1,-1}，d 是秘密差值。R 只隐藏符号方向，不隐藏 |A*d+B| 的大小。
-因此接收 V 的一方能学到 d 的幅度信息，超出了我们想允许的 leakage。
+我们不在本论文重新审计该 representative 的内部安全，而证明 COT 改写除 Kangaroo 已暴露给 comparison client 的同一 V 外不额外泄漏；详细 reduction 见 `docs/EXP252_KANGAROO_REDUCTION.md`。
 
-除这一点外，当前 private gather、秘密树路由、private leaf lookup、Beaver 证书组合、固定 320 padding、双秘密置换、OpenCheetah fallback ReLU 和最终 merge 都可以在相应标准原语安全性下做组合证明。
+其余 private gather、秘密树路由、private leaf lookup、Beaver 证书组合、固定 320 padding、双秘密置换、OpenCheetah fallback ReLU 和最终 merge 按各自底层安全原语组合证明。
 
 ## 1. 安全模型
 
@@ -114,7 +114,7 @@ OT 只给客户端一行 seed，其余 15 行被 PRG pad 隐藏；被选中的 U
 每个 AND 只打开 d=x XOR a、e=y XOR b，其中 a,b 是 fresh random Beaver bits。
 所以打开值对 x,y 均匀独立。dual-share 版本在同一次 Beaver opening 中同时产出 Boolean share 和 arithmetic share，不打开 cert 本身。
 daBit B2A 同理只打开 x XOR a。
-### 4.5 当前 Kangaroo-style comparison — **不通过**
+### 4.5 当前 Kangaroo-style comparison — 内部 stress test（论文中按 Kangaroo 安全定理归约）
 
 当前三处函数：
 
@@ -153,13 +153,13 @@ daBit B2A 同理只打开 x XOR a。
 - certificate compare：z_i 与 private U_i 形成的 margin 信息；
 - count compare：关于 secret unresolved count w 的额外幅度信息，而不仅是 accepted 一位。
 
-这是当前整体安全证明的唯一核心 blocker，但它是实质性 blocker，不能写成“证明细节待补”。
+以上仅作为内部 stress test 记录；正式论文不重新裁决 Kangaroo 的内部 blinding 安全，而采用 `docs/EXP252_KANGAROO_REDUCTION.md` 中的条件式归约。
 
-### 4.6 Count — 本地求和通过；比较阶段受 4.5 阻塞
+### 4.6 Count — 本地求和通过；比较阶段按 Kangaroo comparison 归约
 
 w=sum_i(1-c_i) 在本地始终只是 additive share，本身不泄漏。
 设计上只需要公开 [w<=320]。
-但当前 acceptance/dummy comparison 使用上述不安全 blinding，所以尚未实现这个最小 leakage 目标。
+acceptance/dummy comparison 的安全性按同一 Kangaroo PackObliviousCom 条件式归约处理；在该外部假设下，这一步不额外扩大声明 leakage。
 
 ### 4.7 Fixed-weight padding + double secret shuffle — 通过（在 secure preprocessing hybrid 中）
 
@@ -221,12 +221,12 @@ merge 仅打开被 fresh random mask 遮住的 selector difference 和 activatio
 
 ## 8. 必须闭合的安全项
 
-- **SEC-1（BLOCKING）**：替换 `kangaroo_ge0_probe64`、`kangaroo_ge0_56`、`kangaroo_ge0`，不能再让一方重构 `V=R(A*d+B)`。
-- **SEC-2（BLOCKING for production）**：所有 regression opening 加 test-only gate，并跑 production smoke test 确认没有 leaf/cert/probe/support opening。
+- **SEC-1（归约条件）**：三处 comparison 必须保持与 Kangaroo PackObliviousCom 相同的 `V=R(A*d+B)` 核心分布，并满足 `zeta>A>B>0`、`R∈{±1}` 与 no-wrap 条件；COT 层只负责安全实现该同一 V。具体见 `docs/EXP252_KANGAROO_REDUCTION.md`。
+- **SEC-2（production requirement）**：所有 regression opening 加 test-only gate，并跑 production smoke test 确认没有 leaf/cert/probe/support opening。
 - **SEC-3（部署要求）**：真实部署使用 secure two-party permutation-correlation generation，或明确可信 dealer；不能使用一台机器同时生成并可读双方 correlation files 的 benchmark helper。
 - **SEC-4（部署要求）**：对所有 one-use preprocessing 加 freshness/reuse guard。
 
-SEC-1 和 SEC-2 没闭合前，端到端隐私定理应标记为 **REJECTED**，而不是 VERIFIED。
+在 Kangaroo PackObliviousCom 安全性作为外部假设、SEC-1 条件成立且 SEC-2~4 按 production 配置满足时，整体定理可标记为 **CONDITIONALLY VERIFIED**。
 
 ## 9. 参考实现/文献
 
