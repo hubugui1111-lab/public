@@ -23,6 +23,20 @@ jobs:
       - name: Clone maintained secure-join
         run: git clone --depth 1 https://github.com/ladnir/secure-join.git /tmp/secure-join
 
+      - name: Patch upstream PPRF alignment
+        working-directory: /tmp/secure-join
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path("secure-join/Perm/PprfPermGen.h")
+          s=p.read_text()
+          s=s.replace("auto base = std::vector<std::array<block, 2>>(mSender.baseOtCount());",
+                      "auto base = oc::AlignedUnVector<std::array<block, 2>>(mSender.baseOtCount());")
+          s=s.replace("auto base = std::vector<block>(mRecver.baseOtCount());",
+                      "auto base = oc::AlignedUnVector<block>(mRecver.baseOtCount());")
+          p.write_text(s)
+          PY
+
       - name: Build secure-join
         working-directory: /tmp/secure-join
         run: python3 build.py -DENABLE_MOCK_OT=true -DENABLE_RELIC=false -DENABLE_SODIUM=false -DCMAKE_BUILD_TYPE=Release
