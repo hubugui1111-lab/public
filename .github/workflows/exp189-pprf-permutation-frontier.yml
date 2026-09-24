@@ -37,6 +37,9 @@ jobs:
           p.write_text(s)
           PY
 
+      - name: Patch PPRF alignment
+        run: python3 scripts/patch_secure_join_pprf_alignment.py /tmp/secure-join
+
       - name: Build secure-join
         working-directory: /tmp/secure-join
         run: python3 build.py -DENABLE_MOCK_OT=true -DENABLE_RELIC=false -DENABLE_SODIUM=false -DCMAKE_BUILD_TYPE=Release
