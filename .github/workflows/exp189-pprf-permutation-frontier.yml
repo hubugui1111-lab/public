@@ -1,0 +1,45 @@
+name: Exp189 PPRF permutation preprocessing frontier
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/exp189-pprf-permutation-frontier.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  exp189:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare output
+        run: mkdir -p "$GITHUB_WORKSPACE/results"
+
+      - name: Clone maintained secure-join
+        run: git clone --depth 1 https://github.com/ladnir/secure-join.git /tmp/secure-join
+
+      - name: Build secure-join
+        working-directory: /tmp/secure-join
+        run: python3 build.py -DENABLE_MOCK_OT=true -DENABLE_RELIC=false -DENABLE_SODIUM=false -DCMAKE_BUILD_TYPE=Release
+
+      - name: Sweep PPRF permutation parameters
+        working-directory: /tmp/secure-join
+        shell: bash
+        run: |
+          set -euo pipefail
+          for t in 64 128 256 512 1024; do
+            echo "=== T=$t ==="
+            ./out/build/linux/frontend/secJoinfrontend -bench -PprfPerm -n 4096 -t "$t" -trials 1               | tee "$GITHUB_WORKSPACE/results/exp189_t${t}.log"
+          done
+
+      - name: Upload Exp189 logs
+        uses: actions/upload-artifact@v4
+        with:
+          name: exp189-pprf-permutation-frontier
+          path: results/exp189_t*.log
+          if-no-files-found: error
