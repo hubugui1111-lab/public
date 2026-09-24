@@ -1,0 +1,102 @@
+name: Exp199 one-product exact certificate E2E
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - 'experiments/exp196_orcompact/exp199_product_certificate_e2e.cpp'
+      - '.github/workflows/exp199-product-certificate-e2e.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  exp199:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare
+        run: mkdir -p "$GITHUB_WORKSPACE/results"
+      - name: Install deps
+        run: sudo apt-get update -qq && sudo apt-get install -y libmpfr-dev libgmp-dev
+      - name: Clone EzPC SCI
+        run: git clone --depth 1 https://github.com/mpc-msri/EzPC.git /tmp/EzPC
+      - name: Install Exp199 sources
+        run: |
+          mkdir -p /tmp/EzPC/SCI/tests/exp196_orcompact
+          cp experiments/exp196_orcompact/* /tmp/EzPC/SCI/tests/exp196_orcompact/
+          printf '\n' >> /tmp/EzPC/SCI/tests/CMakeLists.txt
+          cat >> /tmp/EzPC/SCI/tests/CMakeLists.txt <<'EOF'
+          add_executable(exp199-product-e2e
+            exp196_orcompact/exp199_product_certificate_e2e.cpp
+            exp196_orcompact/orcompact_plan.cpp)
+          target_include_directories(exp199-product-e2e PRIVATE exp196_orcompact)
+          target_link_libraries(exp199-product-e2e SCI-OT)
+          EOF
+      - name: Initialize and patch legacy SEAL
+        run: |
+          git -C /tmp/EzPC submodule update --init --depth 1 SCI/extern/SEAL
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path("/tmp/EzPC/SCI/extern/SEAL/native/src/seal/util/locks.h")
+          s=p.read_text()
+          if "#include <mutex>" not in s:
+              s=s.replace("#pragma once", "#pragma once\n#include <mutex>")
+              p.write_text(s)
+          PY
+      - name: Configure
+        working-directory: /tmp/EzPC/SCI
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON -DBUILD_NETWORKS=OFF
+      - name: Build
+        working-directory: /tmp/EzPC/SCI
+        run: cmake --build build --target exp199-product-e2e -j2
+      - name: Run two-party Exp199
+        working-directory: /tmp/EzPC/SCI
+        shell: bash
+        run: |
+          set -uo pipefail
+          ./build/bin/exp199-product-e2e r=1 p=20290 > "$GITHUB_WORKSPACE/results/exp199_P1.log" 2>&1 &
+          P1=$!
+          sleep 0.2
+          ./build/bin/exp199-product-e2e r=2 p=20290 ip=127.0.0.1 > "$GITHUB_WORKSPACE/results/exp199_P2.log" 2>&1
+          C2=$?
+          wait "$P1"; C1=$?
+          cat "$GITHUB_WORKSPACE/results/exp199_P1.log"
+          cat "$GITHUB_WORKSPACE/results/exp199_P2.log"
+          if [ "$C1" -ne 0 ] || [ "$C2" -ne 0 ]; then exit 3; fi
+      - name: Parse
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import json,pathlib
+          rows=[]; phases=[]
+          for p in sorted(pathlib.Path("results").glob("exp199_P*.log")):
+              for line in p.read_text().splitlines():
+                  if line.startswith("EXP199_PHASE "):
+                      d={"source":p.name}
+                      for tok in line[len("EXP199_PHASE "):].split():
+                          k,v=tok.split("=",1)
+                          try:d[k]=float(v) if "." in v else int(v)
+                          except:d[k]=v
+                      phases.append(d)
+                  elif line.startswith("EXP199_RESULT "):
+                      d={"source":p.name}
+                      for tok in line[len("EXP199_RESULT "):].split():
+                          k,v=tok.split("=",1)
+                          try:d[k]=float(v) if "." in v else int(v)
+                          except:d[k]=v
+                      rows.append(d)
+          report={"experiment":"Exp199 one-product exact certificate E2E","rows":rows,"phases":phases}
+          pathlib.Path("results/exp199_product_e2e.json").write_text(json.dumps(report,indent=2))
+          print(json.dumps(report,indent=2))
+          if len(rows)!=2: raise SystemExit(f"expected 2 rows, got {len(rows)}")
+          if any(r.get("mismatches",1) for r in rows): raise SystemExit("mismatch")
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: exp199-product-certificate-e2e
+          path: results/exp199_*
+          if-no-files-found: error
