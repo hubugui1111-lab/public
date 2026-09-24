@@ -70,9 +70,12 @@ if "void Exp187_shuffle_benchmark" not in s:
 		oc::Matrix<u8> clear(M, fwdBytes), in0(M, fwdBytes), in1(M, fwdBytes);
 		oc::Matrix<u8> sh0(M, fwdBytes), sh1(M, fwdBytes);
 		std::memset(clear.data(), 0, clear.size());
+		std::vector<u8> realActive(N, 0);
+		Perm activePerm(N, prng0);
+		for (u64 i = 0; i < w; ++i) realActive[activePerm[i]] = 1;
 		for (u64 i = 0; i < N; ++i)
 		{
-			clear(i, 0) = i < w;
+			clear(i, 0) = realActive[i];
 			u64 z = ((i * 7919 + 17) & ((1ull << 48) - 1));
 			if (!z) z = 1;
 			for (u64 k = 0; k < 6; ++k) clear(i, 1 + k) = u8(z >> (8 * k));
@@ -123,7 +126,7 @@ if "void Exp187_shuffle_benchmark" not in s:
 			for (u64 k = 0; k < 6; ++k)
 			{
 				u8 got = back0(i,k) ^ back1(i,k);
-				u8 exp = i < w ? clear(i,1+k) : 0;
+				u8 exp = realActive[i] ? clear(i,1+k) : 0;
 				mismatches += got != exp;
 			}
 		}
