@@ -21,6 +21,10 @@ jobs:
         run: mkdir -p "$GITHUB_WORKSPACE/results"
       - name: Clone EzPC SCI
         run: git clone --depth 1 https://github.com/mpc-msri/EzPC.git /tmp/EzPC
+      - name: Patch legacy SEAL GCC compatibility
+        run: |
+          sed -i '1i #include <mutex>' /tmp/EzPC/SCI/extern/SEAL/native/src/seal/util/locks.h
+
       - name: Install Exp193 source
         run: |
           cp experiments/exp193_sci_relu_ring.cpp /tmp/EzPC/SCI/tests/exp193_sci_relu_ring.cpp
