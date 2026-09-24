@@ -1,9 +1,9 @@
+#include <seal/seal.h>
 #include "FloatingPoint/fp-math.h"
 #include "utils/io_pack.h"
 #include "OT/emp-ot.h"
 #include "shared_controls.h"
 #include "prepared_shared_leaf_lookup16.h"
-#include <seal/seal.h>
 #include <algorithm>
 #include <array>
 #include <chrono>
