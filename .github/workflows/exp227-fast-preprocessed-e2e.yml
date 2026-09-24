@@ -1,0 +1,187 @@
+name: Exp227 fast-preprocessed full E2E
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - 'experiments/exp227_additive_perm_preprocess.cpp'
+      - 'experiments/exp227_fast_preprocessed_e2e.cpp'
+      - 'scripts/patch_secure_join_exp226_dump.py'
+      - '.github/workflows/exp227-fast-preprocessed-e2e.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  exp227:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare
+        run: mkdir -p "$GITHUB_WORKSPACE/results"
+      - name: Install deps
+        run: sudo apt-get update -qq && sudo apt-get install -y libmpfr-dev libgmp-dev cmake g++ make git
+
+      - name: Clone maintained secure-join
+        run: git clone --depth 1 https://github.com/ladnir/secure-join.git /tmp/secure-join
+      - name: Patch exact-shape secure correlation dump
+        run: python3 scripts/patch_secure_join_exp226_dump.py /tmp/secure-join
+      - name: Build secure-join with real base OT
+        working-directory: /tmp/secure-join
+        run: python3 build.py -DENABLE_MOCK_OT=false -DCMAKE_BUILD_TYPE=Release
+      - name: Generate one-use XOR permutation correlations
+        working-directory: /tmp/secure-join
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./out/build/linux/frontend/secJoinfrontend -bench -Exp226 -n 3072 -B 320 -mock 0 -nt 2 -out "$GITHUB_WORKSPACE/results" \
+            | tee "$GITHUB_WORKSPACE/results/exp227_corr.log"
+
+      - name: Build and install SEAL 4.1.2
+        run: |
+          git clone --depth 1 --branch v4.1.2 https://github.com/microsoft/SEAL.git /tmp/SEAL
+          cmake -S /tmp/SEAL -B /tmp/SEAL/build -DSEAL_BUILD_TESTS=OFF -DSEAL_BUILD_EXAMPLES=OFF -DCMAKE_BUILD_TYPE=Release
+          cmake --build /tmp/SEAL/build -j2
+          sudo cmake --install /tmp/SEAL/build
+
+      - name: Clone EzPC SCI
+        run: git clone --depth 1 https://github.com/mpc-msri/EzPC.git /tmp/EzPC
+      - name: Install Exp227 sources
+        run: |
+          mkdir -p /tmp/EzPC/SCI/tests/exp227
+          cp experiments/exp227_additive_perm_preprocess.cpp /tmp/EzPC/SCI/tests/
+          cp experiments/exp227_fast_preprocessed_e2e.cpp /tmp/EzPC/SCI/tests/exp227/
+          cp experiments/exp198_leaf/prepared_shared_leaf_lookup16.h /tmp/EzPC/SCI/tests/exp227/
+          cp experiments/exp196_orcompact/shared_controls.h /tmp/EzPC/SCI/tests/exp227/
+          cp experiments/exp196_orcompact/private_gates.h /tmp/EzPC/SCI/tests/exp227/
+          cp experiments/exp196_orcompact/orcompact_scatter.h /tmp/EzPC/SCI/tests/exp227/
+          cp experiments/exp196_orcompact/orcompact_plan.cpp /tmp/EzPC/SCI/tests/exp227/
+          printf '\n' >> /tmp/EzPC/SCI/tests/CMakeLists.txt
+          cat >> /tmp/EzPC/SCI/tests/CMakeLists.txt <<'EOF'
+          find_package(SEAL 4.1 REQUIRED)
+          add_executable(exp227-preprocess exp227_additive_perm_preprocess.cpp)
+          target_link_libraries(exp227-preprocess SCI-OT)
+          add_executable(exp227-full-e2e
+            exp227/exp227_fast_preprocessed_e2e.cpp
+            exp227/orcompact_plan.cpp)
+          target_include_directories(exp227-full-e2e PRIVATE exp227)
+          target_link_libraries(exp227-full-e2e SCI-OT SCI-GC SEAL::seal)
+          EOF
+      - name: Initialize and patch legacy SEAL
+        run: |
+          git -C /tmp/EzPC submodule update --init --depth 1 SCI/extern/SEAL
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path("/tmp/EzPC/SCI/extern/SEAL/native/src/seal/util/locks.h")
+          s=p.read_text()
+          if "#include <mutex>" not in s:
+              s=s.replace("#pragma once","#pragma once\n#include <mutex>")
+              p.write_text(s)
+          PY
+      - name: Configure SCI
+        working-directory: /tmp/EzPC/SCI
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON -DBUILD_NETWORKS=OFF
+      - name: Build Exp227
+        working-directory: /tmp/EzPC/SCI
+        run: cmake --build build --target exp227-preprocess exp227-full-e2e -j2
+
+      - name: Convert XOR correlations to additive CorrPair
+        working-directory: /tmp/EzPC/SCI
+        shell: bash
+        run: |
+          set -uo pipefail
+          ./build/bin/exp227-preprocess r=1 p=20370 file="$GITHUB_WORKSPACE/results/exp226_alice.bin" out="$GITHUB_WORKSPACE/results/exp227_add_alice.bin" validate=0 > "$GITHUB_WORKSPACE/results/exp227_prep_P1.log" 2>&1 &
+          P1=$!
+          sleep 0.2
+          ./build/bin/exp227-preprocess r=2 p=20370 ip=127.0.0.1 file="$GITHUB_WORKSPACE/results/exp226_bob.bin" out="$GITHUB_WORKSPACE/results/exp227_add_bob.bin" validate=0 > "$GITHUB_WORKSPACE/results/exp227_prep_P2.log" 2>&1
+          C2=$?
+          wait "$P1"; C1=$?
+          cat "$GITHUB_WORKSPACE/results/exp227_prep_P1.log"
+          cat "$GITHUB_WORKSPACE/results/exp227_prep_P2.log"
+          if [ "$C1" -ne 0 ] || [ "$C2" -ne 0 ]; then exit 3; fi
+
+      - name: Run full two-party Exp227
+        working-directory: /tmp/EzPC/SCI
+        shell: bash
+        run: |
+          set -uo pipefail
+          ./build/bin/exp227-full-e2e r=1 p=20371 permfile="$GITHUB_WORKSPACE/results/exp227_add_alice.bin" > "$GITHUB_WORKSPACE/results/exp227_P1.log" 2>&1 &
+          P1=$!
+          sleep 0.3
+          ./build/bin/exp227-full-e2e r=2 p=20371 ip=127.0.0.1 permfile="$GITHUB_WORKSPACE/results/exp227_add_bob.bin" > "$GITHUB_WORKSPACE/results/exp227_P2.log" 2>&1
+          C2=$?
+          wait "$P1"; C1=$?
+          cat "$GITHUB_WORKSPACE/results/exp227_P1.log"
+          cat "$GITHUB_WORKSPACE/results/exp227_P2.log"
+          if [ "$C1" -ne 0 ] || [ "$C2" -ne 0 ]; then exit 3; fi
+
+      - name: Parse
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import json,pathlib
+          corr={}
+          for line in pathlib.Path("results/exp227_corr.log").read_text().splitlines():
+              if line.startswith("EXP226_CORR_RESULT "):
+                  for tok in line[len("EXP226_CORR_RESULT "):].split():
+                      k,v=tok.split("=",1)
+                      try:corr[k]=float(v) if "." in v else int(v)
+                      except:corr[k]=v
+          prep=[]
+          for p in sorted(pathlib.Path("results").glob("exp227_prep_P*.log")):
+              for line in p.read_text().splitlines():
+                  if line.startswith("EXP227_PREP_RESULT "):
+                      d={"source":p.name}
+                      for tok in line[len("EXP227_PREP_RESULT "):].split():
+                          k,v=tok.split("=",1)
+                          try:d[k]=float(v) if "." in v else int(v)
+                          except:d[k]=v
+                      prep.append(d)
+          rows=[];phases=[]
+          for p in sorted(pathlib.Path("results").glob("exp227_P*.log")):
+              for line in p.read_text().splitlines():
+                  if line.startswith("EXP227_PHASE "):
+                      d={"source":p.name}
+                      for tok in line[len("EXP227_PHASE "):].split():
+                          k,v=tok.split("=",1)
+                          try:d[k]=float(v) if "." in v else int(v)
+                          except:d[k]=v
+                      phases.append(d)
+                  elif line.startswith("EXP227_RESULT "):
+                      d={"source":p.name}
+                      for tok in line[len("EXP227_RESULT "):].split():
+                          k,v=tok.split("=",1)
+                          try:d[k]=float(v) if "." in v else int(v)
+                          except:d[k]=v
+                      rows.append(d)
+          if len(prep)!=2: raise SystemExit(f"expected 2 prep rows got {len(prep)}")
+          if len(rows)!=2: raise SystemExit(f"expected 2 e2e rows got {len(rows)}")
+          if any(r.get("mismatches",1) for r in rows): raise SystemExit("e2e mismatch")
+          p1=next(r for r in prep if r["party"]==1)
+          report={
+            "experiment":"Exp227 fast permutation-preprocessed full E2E",
+            "secure_join_correlation":corr,
+            "x2a_prep_rows":prep,
+            "shuffle_preprocess_ms_party1":corr.get("preprocess_ms",0)+p1.get("x2a_ms",0),
+            "shuffle_preprocess_bytes_party1":corr.get("preprocess_bytes",0)+p1.get("x2a_bytes",0),
+            "e2e_rows":rows,
+            "phases":phases,
+          }
+          pathlib.Path("results/exp227_report.json").write_text(json.dumps(report,indent=2))
+          print(json.dumps(report,indent=2))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: exp227-fast-preprocessed-e2e
+          path: |
+            results/exp227_corr.log
+            results/exp227_prep_P1.log
+            results/exp227_prep_P2.log
+            results/exp227_P1.log
+            results/exp227_P2.log
+            results/exp227_report.json
+          if-no-files-found: error
