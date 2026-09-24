@@ -1,0 +1,127 @@
+name: Exp226 secure permutation to additive bridge
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - 'experiments/exp226_additive_perm_bridge.cpp'
+      - 'scripts/patch_secure_join_exp226_dump.py'
+      - '.github/workflows/exp226-additive-perm-bridge.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  exp226:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare
+        run: mkdir -p "$GITHUB_WORKSPACE/results"
+
+      - name: Install SCI deps
+        run: sudo apt-get update -qq && sudo apt-get install -y libmpfr-dev libgmp-dev cmake g++ make git
+
+      - name: Clone maintained secure-join
+        run: git clone --depth 1 https://github.com/ladnir/secure-join.git /tmp/secure-join
+      - name: Patch Exp226 correlation dump
+        run: python3 scripts/patch_secure_join_exp226_dump.py /tmp/secure-join
+      - name: Build secure-join with real base OT
+        working-directory: /tmp/secure-join
+        run: python3 build.py -DENABLE_MOCK_OT=false -DCMAKE_BUILD_TYPE=Release
+      - name: Generate exact-shape secure correlations
+        working-directory: /tmp/secure-join
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./out/build/linux/frontend/secJoinfrontend -bench -Exp226 -n 3072 -B 320 -mock 0 -nt 2 -out "$GITHUB_WORKSPACE/results" \
+            | tee "$GITHUB_WORKSPACE/results/exp226_corr.log"
+          test -s "$GITHUB_WORKSPACE/results/exp226_alice.bin"
+          test -s "$GITHUB_WORKSPACE/results/exp226_bob.bin"
+
+      - name: Clone EzPC SCI
+        run: git clone --depth 1 https://github.com/mpc-msri/EzPC.git /tmp/EzPC
+      - name: Install bridge source
+        run: |
+          cp experiments/exp226_additive_perm_bridge.cpp /tmp/EzPC/SCI/tests/
+          printf '\n' >> /tmp/EzPC/SCI/tests/CMakeLists.txt
+          cat >> /tmp/EzPC/SCI/tests/CMakeLists.txt <<'EOF'
+          add_executable(exp226-additive-bridge exp226_additive_perm_bridge.cpp)
+          target_link_libraries(exp226-additive-bridge SCI-OT)
+          EOF
+      - name: Initialize and patch legacy SEAL
+        run: |
+          git -C /tmp/EzPC submodule update --init --depth 1 SCI/extern/SEAL
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path("/tmp/EzPC/SCI/extern/SEAL/native/src/seal/util/locks.h")
+          s=p.read_text()
+          if "#include <mutex>" not in s:
+              s=s.replace("#pragma once","#pragma once\n#include <mutex>")
+              p.write_text(s)
+          PY
+      - name: Configure SCI
+        working-directory: /tmp/EzPC/SCI
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON -DBUILD_NETWORKS=OFF
+      - name: Build bridge
+        working-directory: /tmp/EzPC/SCI
+        run: cmake --build build --target exp226-additive-bridge -j2
+      - name: Run two-party additive bridge
+        working-directory: /tmp/EzPC/SCI
+        shell: bash
+        run: |
+          set -uo pipefail
+          ./build/bin/exp226-additive-bridge r=1 p=20360 file="$GITHUB_WORKSPACE/results/exp226_alice.bin" > "$GITHUB_WORKSPACE/results/exp226_P1.log" 2>&1 &
+          P1=$!
+          sleep 0.2
+          ./build/bin/exp226-additive-bridge r=2 p=20360 ip=127.0.0.1 file="$GITHUB_WORKSPACE/results/exp226_bob.bin" > "$GITHUB_WORKSPACE/results/exp226_P2.log" 2>&1
+          C2=$?
+          wait "$P1"; C1=$?
+          cat "$GITHUB_WORKSPACE/results/exp226_P1.log"
+          cat "$GITHUB_WORKSPACE/results/exp226_P2.log"
+          if [ "$C1" -ne 0 ] || [ "$C2" -ne 0 ]; then exit 3; fi
+
+      - name: Parse
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import json,pathlib,re
+          corr={}
+          p=pathlib.Path("results/exp226_corr.log")
+          if p.exists():
+              for line in p.read_text().splitlines():
+                  if line.startswith("EXP226_CORR_RESULT "):
+                      for tok in line[len("EXP226_CORR_RESULT "):].split():
+                          k,v=tok.split("=",1)
+                          try:corr[k]=float(v) if "." in v else int(v)
+                          except:corr[k]=v
+          rows=[]
+          for p in sorted(pathlib.Path("results").glob("exp226_P*.log")):
+              for line in p.read_text().splitlines():
+                  if line.startswith("EXP226_RESULT "):
+                      d={"source":p.name}
+                      for tok in line[len("EXP226_RESULT "):].split():
+                          k,v=tok.split("=",1)
+                          try:d[k]=float(v) if "." in v else int(v)
+                          except:d[k]=v
+                      rows.append(d)
+          report={"experiment":"Exp226 secure XOR permutation correlation -> additive CorrPair bridge",
+                  "secure_join_correlation":corr,"bridge_rows":rows}
+          pathlib.Path("results/exp226_report.json").write_text(json.dumps(report,indent=2))
+          print(json.dumps(report,indent=2))
+          if len(rows)!=2: raise SystemExit(f"expected 2 bridge rows got {len(rows)}")
+          if any(r.get("mismatches",1) for r in rows): raise SystemExit("bridge mismatch")
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: exp226-additive-perm-bridge
+          path: |
+            results/exp226_corr.log
+            results/exp226_P1.log
+            results/exp226_P2.log
+            results/exp226_report.json
+          if-no-files-found: error
