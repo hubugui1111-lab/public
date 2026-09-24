@@ -29,8 +29,13 @@ jobs:
           sudo cmake --install /tmp/SEAL/build
       - name: Build Exp200
         run: |
-          g++ -O3 -std=c++17 experiments/exp200_kangaroo_aux_xorshare.cpp -o /tmp/exp200 \
-            -lseal-4.1 -pthread
+          INC="$(dirname "$(find /usr/local/include -path '*/seal/seal.h' | head -1)")"
+          INC="$(dirname "$INC")"
+          LIB="$(find /usr/local/lib /usr/local/lib64 -name 'libseal-4.1.*' | head -1)"
+          echo "SEAL include=$INC lib=$LIB"
+          test -n "$INC"
+          test -n "$LIB"
+          g++ -O3 -std=c++17 -I"$INC" experiments/exp200_kangaroo_aux_xorshare.cpp "$LIB" -o /tmp/exp200 -pthread
       - name: Run
         run: |
           /tmp/exp200 | tee exp200.log
