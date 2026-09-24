@@ -28,23 +28,23 @@ jobs:
           add_executable(exp194-secure-audit exp194_secure_leaf_certificate_audit.cpp)
           target_link_libraries(exp194-secure-audit SCI-OT)
           EOF
+      - name: Initialize and patch legacy SEAL
+        run: |
+          git -C /tmp/EzPC submodule update --init --depth 1 SCI/extern/SEAL
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path("/tmp/EzPC/SCI/extern/SEAL/native/src/seal/util/locks.h")
+          if not p.exists():
+              raise SystemExit("SEAL locks.h not found before configure")
+          s=p.read_text()
+          if "#include <mutex>" not in s:
+              s=s.replace("#pragma once", "#pragma once\n#include <mutex>")
+              p.write_text(s)
+          print("patched",p)
+          PY
       - name: Configure
         working-directory: /tmp/EzPC/SCI
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON -DBUILD_NETWORKS=OFF
-      - name: Patch SEAL mutex include
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          cands=list(Path("/tmp/EzPC/SCI").glob("**/seal/util/locks.h"))
-          if not cands:
-              raise SystemExit("SEAL locks.h not found after configure")
-          for p in cands:
-              s=p.read_text()
-              if "#include <mutex>" not in s:
-                  s=s.replace("#pragma once", "#pragma once\n#include <mutex>")
-                  p.write_text(s)
-              print("patched",p)
-          PY
       - name: Build
         working-directory: /tmp/EzPC/SCI
         run: cmake --build build --target exp194-secure-audit -j2
