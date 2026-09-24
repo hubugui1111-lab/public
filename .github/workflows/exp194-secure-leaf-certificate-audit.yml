@@ -28,6 +28,16 @@ jobs:
           add_executable(exp194-secure-audit exp194_secure_leaf_certificate_audit.cpp)
           target_link_libraries(exp194-secure-audit SCI-OT)
           EOF
+      - name: Patch SEAL mutex include
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path("/tmp/EzPC/SCI/extern/SEAL/native/src/seal/util/locks.h")
+          s=p.read_text()
+          if "#include <mutex>" not in s:
+              s=s.replace("#pragma once", "#pragma once\n#include <mutex>")
+          p.write_text(s)
+          PY
       - name: Build
         working-directory: /tmp/EzPC/SCI
         run: |
