@@ -1,0 +1,88 @@
+name: Exp194 secure leaf certificate audit
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - 'experiments/exp194_secure_leaf_certificate_audit.cpp'
+      - '.github/workflows/exp194-secure-leaf-certificate-audit.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  exp194:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare
+        run: mkdir -p "$GITHUB_WORKSPACE/results"
+      - name: Clone EzPC SCI
+        run: git clone --depth 1 https://github.com/mpc-msri/EzPC.git /tmp/EzPC
+      - name: Install source
+        run: |
+          cp experiments/exp194_secure_leaf_certificate_audit.cpp /tmp/EzPC/SCI/tests/exp194_secure_leaf_certificate_audit.cpp
+          cat >> /tmp/EzPC/SCI/tests/CMakeLists.txt <<'EOF'
+          add_executable(exp194-secure-audit exp194_secure_leaf_certificate_audit.cpp)
+          target_link_libraries(exp194-secure-audit SCI-OT)
+          EOF
+      - name: Build
+        working-directory: /tmp/EzPC/SCI
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON -DBUILD_NETWORKS=OFF
+          cmake --build build --target exp194-secure-audit -j2
+      - name: Run two-party closed upstream
+        working-directory: /tmp/EzPC/SCI
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./build/bin/exp194-secure-audit r=1 p=20240 > "$GITHUB_WORKSPACE/results/exp194_P1.log" 2>&1 &
+          P1=$!
+          sleep 0.2
+          ./build/bin/exp194-secure-audit r=2 p=20240 ip=127.0.0.1 > "$GITHUB_WORKSPACE/results/exp194_P2.log" 2>&1
+          wait "$P1"
+          cat "$GITHUB_WORKSPACE/results/exp194_P1.log"
+          cat "$GITHUB_WORKSPACE/results/exp194_P2.log"
+      - name: Parse
+        run: |
+          python3 - <<'PY'
+          import json,pathlib
+          rows=[]; phases=[]
+          for p in sorted(pathlib.Path("results").glob("exp194_P*.log")):
+              for line in p.read_text().splitlines():
+                  if line.startswith("EXP194_PHASE "):
+                      d={"source":p.name}
+                      for tok in line[len("EXP194_PHASE "):].split():
+                          k,v=tok.split("=",1)
+                          try:d[k]=float(v) if "." in v else int(v)
+                          except:d[k]=v
+                      phases.append(d)
+                  if line.startswith("EXP194_RESULT "):
+                      d={"source":p.name}
+                      for tok in line[len("EXP194_RESULT "):].split():
+                          k,v=tok.split("=",1)
+                          try:d[k]=float(v) if "." in v else int(v)
+                          except:d[k]=v
+                      rows.append(d)
+          if len(rows)!=2: raise SystemExit(f"expected 2 result rows, got {len(rows)}")
+          if any(r["mismatches"] for r in rows): raise SystemExit("mismatch")
+          alice=next(r for r in rows if r["party"]==1)
+          report={
+            "experiment":"Exp194 secure leaf + exact certificate upstream closure",
+            "scope":"real 2PC from secret z through 15 fixed-shape probes, secret leaf routing, private 16-way parameter selection, exact q<0 certificate and certified-value construction; tail excluded",
+            "alice":alice,
+            "phases":phases,
+            "pre_tail_vs_full_relu_bytes_ratio":alice["pre_tail_bytes"]/alice["full_relu_bytes"],
+            "pre_tail_vs_full_relu_rounds_ratio":alice["pre_tail_rounds"]/alice["full_relu_rounds"],
+            "pre_tail_vs_full_relu_ms_ratio":alice["pre_tail_ms"]/alice["full_relu_ms"],
+          }
+          pathlib.Path("results/exp194_secure_leaf_certificate_audit.json").write_text(json.dumps(report,indent=2))
+          print(json.dumps(report,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: exp194-secure-leaf-certificate-audit
+          path: results/exp194_*
+          if-no-files-found: error
