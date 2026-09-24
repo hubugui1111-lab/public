@@ -1,6 +1,7 @@
 #include "FloatingPoint/fp-math.h"
 #include "utils/io_pack.h"
 #include "OT/emp-ot.h"
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <iostream>
