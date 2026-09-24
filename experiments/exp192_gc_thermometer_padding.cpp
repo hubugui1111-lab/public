@@ -37,11 +37,12 @@ int run_case(int party, int w) {
     onehot.push_back(Bit::constant(sess.ctx(), true));
     for (int bit=0; bit<K; ++bit) {
         Bit x(sess.ctx(), need.w[bit]);
-        std::vector<Bit> next(2*onehot.size());
-        for (size_t i=0;i<onehot.size();++i) {
+        const size_t old = onehot.size();
+        std::vector<Bit> next(2*old);
+        for (size_t i=0;i<old;++i) {
             Bit high = onehot[i] & x;
-            next[2*i] = onehot[i] ^ high;
-            next[2*i+1] = high;
+            next[i] = onehot[i] ^ high;
+            next[i+old] = high;
         }
         onehot = std::move(next);
     }
