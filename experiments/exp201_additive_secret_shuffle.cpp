@@ -292,55 +292,52 @@ int main(int argc,char**argv){
   }
   auto local=share_clear(io,party,rng,clear);
 
-  Phase movement;
   int open_weight=0,mismatches=0;
-  uint64_t movement_bytes=0,movement_rounds_measured=0;
-  double movement_ms=0;
   std::vector<uint32_t> final_share(M);
-
-  auto t0=Clock::now();auto b0=io.get_comm(),r0=io.get_rounds();
-
-  // Round 1: Bob -> Alice, apply Alice's p0.
-  auto y0=apply_regular(io,party,ALICE,p0.p,p0.fwd,local,2);
-  // Round 2: Alice -> Bob, apply Bob's p1.
-  auto y1=apply_regular(io,party,BOB,p1.p,p1.fwd,y0,2);
-
-  // Round 3: open only the shuffled fixed-weight flag vector.
-  std::vector<uint32_t> peer_flags(M),flags(M);
-  std::vector<uint32_t> my_flags(M);
-  for(int i=0;i<M;++i)my_flags[i]=y1[size_t(i)*2];
-  if(party==ALICE){
-    io.io->send_data(my_flags.data(),M*4);io.io->flush();
-    io.io->recv_data(peer_flags.data(),M*4);
-  }else{
-    io.io->recv_data(peer_flags.data(),M*4);
-    io.io->send_data(my_flags.data(),M*4);io.io->flush();
-  }
+  std::vector<uint32_t> y1;
   std::vector<int> active;
-  for(int i=0;i<M;++i){
-    flags[i]=add24(my_flags[i],peer_flags[i]);
-    if(flags[i]){++open_weight;active.push_back(i);}
-    if(flags[i]>1)++mismatches;
-  }
-  if(int(active.size())!=CAP)mismatches++;
+
+  // Movement rounds 1--3: two one-message permutation shares, then open only
+  // the uniformly shuffled fixed-weight flag vector.
+  Phase ph_forward=measure(io,[&]{
+    auto y0=apply_regular(io,party,ALICE,p0.p,p0.fwd,local,2);
+    y1=apply_regular(io,party,BOB,p1.p,p1.fwd,y0,2);
+
+    std::vector<uint32_t> peer_flags(M),flags(M),my_flags(M);
+    for(int i=0;i<M;++i)my_flags[i]=y1[size_t(i)*2];
+    if(party==ALICE){
+      io.io->send_data(my_flags.data(),M*4);io.io->flush();
+      io.io->recv_data(peer_flags.data(),M*4);
+    }else{
+      io.io->recv_data(peer_flags.data(),M*4);
+      io.io->send_data(my_flags.data(),M*4);io.io->flush();
+    }
+    for(int i=0;i<M;++i){
+      flags[i]=add24(my_flags[i],peer_flags[i]);
+      if(flags[i]){++open_weight;active.push_back(i);}
+      if(flags[i]>1)++mismatches;
+    }
+    if(int(active.size())!=CAP)mismatches++;
+  });
 
   // Native baseline ReLU, completely unchanged, on exactly CAP public shuffled slots.
-  FixArray tail(party,CAP,true,ELL,0);
-  for(int k=0;k<CAP;++k)tail.data[k]=y1[size_t(active[k])*2+1];
-  auto relu=native_relu(math,tail);
   std::vector<uint32_t> shuffled_out(M,0);
-  for(int k=0;k<CAP;++k)shuffled_out[active[k]]=uint32_t(relu.data[k])&RMASK;
+  Phase ph_relu=measure(io,[&]{
+    FixArray tail(party,CAP,true,ELL,0);
+    for(int k=0;k<CAP;++k)tail.data[k]=y1[size_t(active[k])*2+1];
+    auto relu=native_relu(math,tail);
+    for(int k=0;k<CAP;++k)shuffled_out[active[k]]=uint32_t(relu.data[k])&RMASK;
+  });
 
-  // Round 4: Alice -> Bob, inverse Bob p1.
-  auto x1=apply_inverse(io,party,BOB,p1.p,p1.inv,shuffled_out,1);
-  // Round 5: Bob -> Alice, inverse Alice p0.
-  auto x0=apply_inverse(io,party,ALICE,p0.p,p0.inv,x1,1);
-  final_share=x0;
+  // Movement rounds 4--5: inverse the same secret-shared random permutation.
+  Phase ph_inverse=measure(io,[&]{
+    auto x1=apply_inverse(io,party,BOB,p1.p,p1.inv,shuffled_out,1);
+    final_share=apply_inverse(io,party,ALICE,p0.p,p0.inv,x1,1);
+  });
 
-  flush_all(io);
-  movement_bytes=io.get_comm()-b0;
-  movement_rounds_measured=io.get_rounds()-r0;
-  movement_ms=std::chrono::duration<double,std::milli>(Clock::now()-t0).count();
+  const uint64_t movement_bytes=ph_forward.bytes+ph_inverse.bytes;
+  const uint64_t movement_rounds_measured=ph_forward.rounds+ph_inverse.rounds;
+  const double movement_ms=ph_forward.ms+ph_inverse.ms;
 
   // Regression opening AFTER measured path.
   std::vector<uint32_t> peer(M),opened(M);
@@ -367,6 +364,11 @@ int main(int argc,char**argv){
            <<" movement_conceptual_rounds=5"
            <<" movement_measured_rounds="<<movement_rounds_measured
            <<" movement_bytes="<<movement_bytes<<" movement_ms="<<movement_ms
+           <<" forward_measured_rounds="<<ph_forward.rounds
+           <<" inverse_measured_rounds="<<ph_inverse.rounds
+           <<" native_relu_bytes="<<ph_relu.bytes
+           <<" native_relu_rounds="<<ph_relu.rounds
+           <<" native_relu_ms="<<ph_relu.ms
            <<" opened_weight="<<open_weight
            <<" native_relu_calls="<<CAP
            <<" mismatches="<<mismatches<<"\n";
