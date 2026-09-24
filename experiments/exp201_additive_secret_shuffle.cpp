@@ -1,7 +1,7 @@
+#include <seal/seal.h>
 #include "FloatingPoint/fp-math.h"
 #include "utils/io_pack.h"
 #include "OT/emp-ot.h"
-#include <seal/seal.h>
 #include <algorithm>
 #include <array>
 #include <chrono>
