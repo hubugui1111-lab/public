@@ -1,0 +1,84 @@
+name: Exp199 Lu25 comparison reproduction
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/exp199-lu25-comparison.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  exp199:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y unzip cmake ninja-build libssl-dev libboost-all-dev libgmp-dev libntl-dev
+      - name: Download Lu et al. USENIX 2025 artifact
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/lu25
+          python3 - <<'PY'
+          import urllib.request
+          urls=[
+            "https://zenodo.org/records/17217396/files/2PC_eq_cmp-main.zip?download=1",
+            "https://zenodo.org/records/14580231/files/2PC_eq_cmp-main.zip?download=1",
+          ]
+          last=None
+          for u in urls:
+              try:
+                  req=urllib.request.Request(u,headers={"User-Agent":"Mozilla/5.0"})
+                  with urllib.request.urlopen(req,timeout=60) as r, open("/tmp/lu25.zip","wb") as f:
+                      f.write(r.read())
+                  print("downloaded",u)
+                  break
+              except Exception as e:
+                  print("failed",u,e)
+                  last=e
+          else:
+              raise last
+          PY
+          unzip -q /tmp/lu25.zip -d /tmp/lu25
+          find /tmp/lu25 -maxdepth 3 -type f -print | sort | head -200
+
+      - name: Inspect artifact build instructions
+        run: |
+          set -euo pipefail
+          find /tmp/lu25 -iname 'README*' -o -iname 'CMakeLists.txt' -o -iname 'Makefile' | while read f; do
+            echo "===== $f ====="
+            sed -n '1,240p' "$f"
+          done | tee "$GITHUB_WORKSPACE/exp199_artifact_inspect.log"
+
+      - name: Detect and build
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$(find /tmp/lu25 -mindepth 1 -maxdepth 2 -type d -name '2PC_eq_cmp*' | head -1)"
+          if [ -z "$ROOT" ]; then ROOT="$(find /tmp/lu25 -mindepth 1 -maxdepth 1 -type d | head -1)"; fi
+          echo "ROOT=$ROOT"
+          find "$ROOT" -maxdepth 3 -type f | sort
+          if [ -f "$ROOT/CMakeLists.txt" ]; then
+            cmake -S "$ROOT" -B "$ROOT/build" -DCMAKE_BUILD_TYPE=Release
+            cmake --build "$ROOT/build" -j2
+          elif [ -f "$ROOT/Makefile" ]; then
+            make -C "$ROOT" -j2
+          else
+            echo "No standard build file; inspect-only run" >&2
+          fi
+          find "$ROOT" -maxdepth 4 -type f -perm -111 -print | tee "$GITHUB_WORKSPACE/exp199_executables.txt"
+
+      - name: Upload inspection
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: exp199-lu25-artifact
+          path: |
+            exp199_artifact_inspect.log
+            exp199_executables.txt
+          if-no-files-found: warn
