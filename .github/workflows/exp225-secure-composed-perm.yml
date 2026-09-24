@@ -1,0 +1,39 @@
+name: Exp225 secure composed permutation preprocessing
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/exp225-secure-composed-perm.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  exp225:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare
+        run: mkdir -p "$GITHUB_WORKSPACE/results"
+      - name: Clone maintained secure-join
+        run: git clone --depth 1 https://github.com/ladnir/secure-join.git /tmp/secure-join
+      - name: Patch Exp187 exact movement benchmark
+        run: python3 scripts/patch_secure_join_exp187.py /tmp/secure-join
+      - name: Build secure-join with real base OT
+        working-directory: /tmp/secure-join
+        run: python3 build.py -DENABLE_MOCK_OT=false -DCMAKE_BUILD_TYPE=Release
+      - name: Run secure exact B320 shape
+        working-directory: /tmp/secure-join
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./out/build/linux/frontend/secJoinfrontend -bench -Exp187 -n 3072 -B 320 -w 214 -mock 0 -nt 2 | tee "$GITHUB_WORKSPACE/results/exp225.log"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: exp225-secure-composed-perm
+          path: results/exp225.log
+          if-no-files-found: error
