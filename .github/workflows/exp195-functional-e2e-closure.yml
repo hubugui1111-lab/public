@@ -19,6 +19,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Prepare
         run: mkdir -p "$GITHUB_WORKSPACE/results"
+      - name: Install system deps
+        run: sudo apt-get update -qq && sudo apt-get install -y libmpfr-dev libgmp-dev
       - name: Clone EzPC SCI
         run: git clone --depth 1 https://github.com/mpc-msri/EzPC.git /tmp/EzPC
       - name: Install source
