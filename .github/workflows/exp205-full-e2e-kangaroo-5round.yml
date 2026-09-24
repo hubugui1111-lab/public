@@ -1,4 +1,4 @@
-name: Exp205 full E2E 5-round movement
+name: Exp205 Kangaroo full E2E 5-round movement
 
 on:
   workflow_dispatch:
@@ -10,7 +10,7 @@ on:
       - 'experiments/exp196_orcompact/shared_controls.h'
       - 'experiments/exp196_orcompact/private_gates.h'
       - 'experiments/exp196_orcompact/orcompact_scatter.h'
-      - '.github/workflows/exp205-full-e2e-5round.yml'
+      - '.github/workflows/exp205-full-e2e-kangaroo-5round.yml'
 
 permissions:
   contents: read
@@ -90,16 +90,16 @@ jobs:
           rows=[]; phases=[]
           for p in sorted(pathlib.Path("results").glob("exp205_P*.log")):
               for line in p.read_text().splitlines():
-                  if line.startswith("EXP203_PHASE "):
+                  if line.startswith("EXP205_PHASE "):
                       d={"source":p.name}
-                      for tok in line[len("EXP203_PHASE "):].split():
+                      for tok in line[len("EXP205_PHASE "):].split():
                           k,v=tok.split("=",1)
                           try:d[k]=float(v) if "." in v else int(v)
                           except:d[k]=v
                       phases.append(d)
-                  elif line.startswith("EXP203_RESULT "):
+                  elif line.startswith("EXP205_RESULT "):
                       d={"source":p.name}
-                      for tok in line[len("EXP203_RESULT "):].split():
+                      for tok in line[len("EXP205_RESULT "):].split():
                           k,v=tok.split("=",1)
                           try:d[k]=float(v) if "." in v else int(v)
                           except:d[k]=v
