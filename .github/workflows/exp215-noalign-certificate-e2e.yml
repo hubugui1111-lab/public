@@ -10,7 +10,7 @@ on:
       - 'experiments/exp196_orcompact/shared_controls.h'
       - 'experiments/exp196_orcompact/private_gates.h'
       - 'experiments/exp196_orcompact/orcompact_scatter.h'
-      - '.github/workflows/exp215-bool-beaver-e2e.yml'
+      - '.github/workflows/exp215-noalign-certificate-e2e.yml'
 
 permissions:
   contents: read
@@ -36,7 +36,7 @@ jobs:
       - name: Install Exp215 sources
         run: |
           mkdir -p /tmp/EzPC/SCI/tests/exp215
-          cp experiments/exp215_bool_beaver_e2e.cpp /tmp/EzPC/SCI/tests/exp215/
+          cp experiments/exp215_noalign_certificate_e2e.cpp /tmp/EzPC/SCI/tests/exp215/
           cp experiments/exp198_leaf/prepared_shared_leaf_lookup16.h /tmp/EzPC/SCI/tests/exp215/
           cp experiments/exp196_orcompact/shared_controls.h /tmp/EzPC/SCI/tests/exp215/
           cp experiments/exp196_orcompact/private_gates.h /tmp/EzPC/SCI/tests/exp215/
