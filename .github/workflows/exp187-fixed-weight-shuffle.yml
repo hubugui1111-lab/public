@@ -1,0 +1,88 @@
+name: Exp187 fixed-weight secret shuffle
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'scripts/patch_secure_join_exp187.py'
+      - '.github/workflows/exp187-fixed-weight-shuffle.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  exp187:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare output
+        run: mkdir -p "$GITHUB_WORKSPACE/results"
+
+      - name: Clone maintained secure-join
+        run: git clone --depth 1 https://github.com/ladnir/secure-join.git /tmp/secure-join
+
+      - name: Patch Exp187 benchmark
+        run: python3 scripts/patch_secure_join_exp187.py /tmp/secure-join
+
+      - name: Build secure-join
+        working-directory: /tmp/secure-join
+        run: python3 build.py -DENABLE_MOCK_OT=true -DENABLE_RELIC=false -DENABLE_SODIUM=false -DCMAKE_BUILD_TYPE=Release
+
+      - name: Smoke benchmark with mock correlations
+        working-directory: /tmp/secure-join
+        run: |
+          ./out/build/linux/frontend/secJoinfrontend -bench -Exp187 -n 3072 -B 320 -w 214 -mock 1 -nt 2 | tee "$GITHUB_WORKSPACE/results/exp187_mock_B320.log"
+
+      - name: Real correlation benchmark B320
+        working-directory: /tmp/secure-join
+        run: |
+          ./out/build/linux/frontend/secJoinfrontend -bench -Exp187 -n 3072 -B 320 -w 214 -mock 0 -nt 2 | tee "$GITHUB_WORKSPACE/results/exp187_real_B320.log"
+
+      - name: Real correlation benchmark B640
+        working-directory: /tmp/secure-join
+        run: |
+          ./out/build/linux/frontend/secJoinfrontend -bench -Exp187 -n 3072 -B 640 -w 292 -mock 0 -nt 2 | tee "$GITHUB_WORKSPACE/results/exp187_real_B640.log"
+
+      - name: Parse compact result
+        run: |
+          python3 - <<'PY'
+          import json, pathlib
+          out=[]
+          for p in sorted(pathlib.Path("results").glob("exp187_*_B*.log")):
+              for line in p.read_text().splitlines():
+                  if not line.startswith("EXP187_RESULT "):
+                      continue
+                  row={"source":p.name}
+                  for tok in line[len("EXP187_RESULT "):].split():
+                      k,v=tok.split("=",1)
+                      try:
+                          row[k]=float(v) if "." in v else int(v)
+                      except ValueError:
+                          row[k]=v
+                  out.append(row)
+          if not out:
+              raise SystemExit("no EXP187_RESULT rows")
+          report={
+              "experiment":"Exp187 fixed-weight secret-shuffle movement microbenchmark",
+              "scope":"movement only; Exp170 mask/certificate frozen and not modified",
+              "reference_exp185_B320_online_bytes":1048818,
+              "reference_exp185_B640_online_bytes":1303602,
+              "rows":out,
+          }
+          pathlib.Path("results/exp187_fixed_weight_shuffle_compact.json").write_text(json.dumps(report,indent=2))
+          print(json.dumps(report,indent=2))
+          PY
+
+      - name: Upload Exp187 artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: exp187-fixed-weight-secret-shuffle
+          path: |
+            results/exp187_mock_B320.log
+            results/exp187_real_B320.log
+            results/exp187_real_B640.log
+            results/exp187_fixed_weight_shuffle_compact.json
+          if-no-files-found: error
