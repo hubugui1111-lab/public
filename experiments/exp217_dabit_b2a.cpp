@@ -32,7 +32,8 @@ FixArray dabit_b2a(IOPack&io,int party,const BoolArray&x,
   const int n=x.size;
   std::vector<uint8_t>d(n);
   for(int i=0;i<n;++i)d[i]=(x.data[i]^a_bool.data[i])&1;
-  auto mine=pack_bits(d),peer(mine.size());
+  auto mine=pack_bits(d);
+  std::vector<uint8_t> peer(mine.size());
   if(party==ALICE){
     io.io->send_data(mine.data(),int(mine.size()));io.io->flush();
     io.io->recv_data(peer.data(),int(peer.size()));
