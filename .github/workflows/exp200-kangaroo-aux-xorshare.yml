@@ -1,0 +1,43 @@
+name: Exp200 Kangaroo auxiliary XOR-share bridge
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - 'experiments/exp200_kangaroo_aux_xorshare.cpp'
+      - '.github/workflows/exp200-kangaroo-aux-xorshare.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  exp200:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y cmake g++ make git
+      - name: Build SEAL 4.1.2
+        run: |
+          git clone --depth 1 --branch v4.1.2 https://github.com/microsoft/SEAL.git /tmp/SEAL
+          cmake -S /tmp/SEAL -B /tmp/SEAL/build -DSEAL_BUILD_TESTS=OFF -DSEAL_BUILD_EXAMPLES=OFF
+          cmake --build /tmp/SEAL/build -j2
+          sudo cmake --install /tmp/SEAL/build
+      - name: Build Exp200
+        run: |
+          g++ -O3 -std=c++17 experiments/exp200_kangaroo_aux_xorshare.cpp -o /tmp/exp200 \
+            -lseal-4.1 -pthread
+      - name: Run
+        run: |
+          /tmp/exp200 | tee exp200.log
+          grep '^EXP200_RESULT' exp200.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: exp200-kangaroo-aux-xorshare
+          path: exp200.log
+          if-no-files-found: error
