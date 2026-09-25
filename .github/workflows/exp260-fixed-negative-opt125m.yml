@@ -97,13 +97,18 @@ jobs:
           cp private-research/experiments/260_fixed_negative_e2e.cpp \
             private-research/experiments/260_fixed_negative_movement.h \
             "$TASK_DIR/EzPC/SCI/tests/exp260/"
+          test -f "$TASK_DIR/EzPC/SCI/tests/260_fixed_negative_perm_preprocess.cpp"
+          test -f "$TASK_DIR/EzPC/SCI/tests/exp260/260_fixed_negative_e2e.cpp"
           cat >> "$TASK_DIR/EzPC/SCI/tests/CMakeLists.txt" <<'EOF'
 
           find_package(SEAL 4.1 REQUIRED)
-          add_executable(exp260-preprocess exp260_fixed_negative_perm_preprocess.cpp)
+          add_executable(exp260-preprocess
+            "${CMAKE_SOURCE_DIR}/tests/260_fixed_negative_perm_preprocess.cpp")
           target_link_libraries(exp260-preprocess SCI-OT)
-          add_executable(exp260-full-e2e exp260/260_fixed_negative_e2e.cpp)
-          target_include_directories(exp260-full-e2e PRIVATE exp260)
+          add_executable(exp260-full-e2e
+            "${CMAKE_SOURCE_DIR}/tests/exp260/260_fixed_negative_e2e.cpp")
+          target_include_directories(exp260-full-e2e PRIVATE
+            "${CMAKE_SOURCE_DIR}/tests/exp260")
           target_link_libraries(exp260-full-e2e SCI-OT SCI-GC SEAL::seal)
           EOF
           python3 - <<'PY'
