@@ -1,0 +1,504 @@
+# TEMPLATE ONLY: install temporarily in the public compute repository.
+# The private checkout is read-only; only allowlisted aggregate metrics are
+# uploaded as a short-lived artifact, then the workflow is removed.
+name: exp260-fixed-negative-opt125m-calibrated
+
+on:
+  workflow_dispatch:
+    inputs:
+      private_ref:
+        description: Full immutable private source SHA
+        required: true
+        type: string
+      layer:
+        description: OPT-125M decoder layer index (0-11)
+        required: true
+        type: choice
+        options:
+          - '0'
+          - '1'
+          - '2'
+          - '3'
+          - '4'
+          - '5'
+          - '6'
+          - '7'
+          - '8'
+          - '9'
+          - '10'
+          - '11'
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 75
+    env:
+      TDA_COMMIT: ${{ inputs.private_ref }}
+      LAYER: ${{ inputs.layer }}
+      HF_HUB_DISABLE_TELEMETRY: '1'
+      TOKENIZERS_PARALLELISM: 'false'
+      OMP_NUM_THREADS: '4'
+      MKL_NUM_THREADS: '4'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Initialize bounded scratch job
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$TDA_COMMIT" =~ ^[0-9a-f]{40}$ ]] || exit 2
+          TASK_DIR="$RUNNER_TEMP/exp260-fixed-negative-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          echo "TASK_DIR=$TASK_DIR" >> "$GITHUB_ENV"
+          echo "HF_HOME=$TASK_DIR/huggingface" >> "$GITHUB_ENV"
+          echo "PIP_CACHE_DIR=$TASK_DIR/pip-cache" >> "$GITHUB_ENV"
+          umask 077
+          mkdir -p "$TASK_DIR/results"
+
+      - name: Checkout private source read-only
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: hubugui1111-lab/tda-ppml-research
+          ref: ${{ inputs.private_ref }}
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          path: private-research
+          fetch-depth: 1
+          persist-credentials: false
+          submodules: false
+
+      - name: Load validated per-layer capacity
+        shell: bash
+        run: |
+          set -euo pipefail
+          CAPACITY=$(python3 - "$LAYER" private-research/experiments/260_fixed_negative_capacity_by_layer.json <<'PY'
+          import json
+          import sys
+          layer = int(sys.argv[1])
+          with open(sys.argv[2], encoding="utf-8") as stream:
+              config = json.load(stream)
+          if config.get("N") != 3072:
+              raise SystemExit("unexpected capacity config N")
+          if config.get("fresh_e2e_input_used_for_capacity") is not False:
+              raise SystemExit("capacity must not be selected from the fresh E2E input")
+          reference_rows = config.get("reference_cohort", {}).get("sample_count")
+          if reference_rows != 256:
+              raise SystemExit("unexpected frozen capacity-reference row count")
+          audit_path = "private-research/results/exp260_fixed_negative_capacity_audit.json"
+          with open(audit_path, encoding="utf-8") as stream:
+              audit = json.load(stream)
+          if audit.get("capacity_source", {}).get("sample_count") != reference_rows:
+              raise SystemExit("capacity config and per-sample audit cohort differ")
+          if audit.get("capacity_source", {}).get("fresh_e2e_input_used_for_capacity") is not False:
+              raise SystemExit("raw audit used the fresh E2E input for capacity")
+          matches = [entry for entry in config["layers"] if entry["layer"] == layer]
+          if len(matches) != 1:
+              raise SystemExit("layer missing or duplicated")
+          row = matches[0]
+          if row["capacity"] != row["max_certificate_unresolved_count"]:
+              raise SystemExit("capacity does not match frozen max certificate-unresolved count")
+          details = [entry for entry in audit["layers"] if entry["layer_name"] == row["layer_name"]]
+          if len(details) != 1:
+              raise SystemExit("layer missing or duplicated in raw capacity audit")
+          counts = details[0]["per_sample"]["certificate_unresolved_count"]
+          if len(counts) != reference_rows or max(counts) != row["capacity"]:
+              raise SystemExit("capacity differs from frozen per-sample unresolved maximum")
+          if any(value > row["capacity"] for value in counts):
+              raise SystemExit("frozen reference sample exceeds configured capacity")
+          print(row["capacity"])
+          PY
+          )
+          [[ "$CAPACITY" =~ ^[1-9][0-9]*$ ]] || exit 2
+          echo "CAPACITY=$CAPACITY" >> "$GITHUB_ENV"
+
+      - name: Install pinned dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C private-research rev-parse HEAD)" = "$TDA_COMMIT"
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq build-essential clang cmake g++ make git \
+            libeigen3-dev libgmp-dev libmpfr-dev libomp-dev libssl-dev python3-venv
+          python3 -m venv "$TASK_DIR/venv"
+          "$TASK_DIR/venv/bin/python" -m pip install --disable-pip-version-check \
+            torch==2.8.0+cpu --index-url https://download.pytorch.org/whl/cpu
+          "$TASK_DIR/venv/bin/python" -m pip install --disable-pip-version-check \
+            numpy==2.1.3 transformers==4.56.2 datasets==3.2.0 \
+            huggingface-hub==0.34.4 safetensors==0.6.2 sentencepiece==0.2.1
+
+      - name: Build secure-join correlation backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --depth 1 https://github.com/ladnir/secure-join.git "$TASK_DIR/secure-join"
+          python3 scripts/patch_secure_join_exp226_dump.py "$TASK_DIR/secure-join"
+          (cd "$TASK_DIR/secure-join" && python3 build.py \
+            -DENABLE_MOCK_OT=false -DCMAKE_BUILD_TYPE=Release)
+          "$TASK_DIR/secure-join/out/build/linux/frontend/secJoinfrontend" \
+            -bench -Exp226 -n 3072 -B "$CAPACITY" -mock 0 -nt 2 -out "$TASK_DIR/results" \
+            > "$TASK_DIR/results/secure_join.log" 2>&1
+
+      - name: Build SEAL and SCI targets
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch v4.1.2 https://github.com/microsoft/SEAL.git "$TASK_DIR/SEAL"
+          cmake -S "$TASK_DIR/SEAL" -B "$TASK_DIR/SEAL/build" \
+            -DSEAL_BUILD_TESTS=OFF -DSEAL_BUILD_EXAMPLES=OFF -DCMAKE_BUILD_TYPE=Release
+          cmake --build "$TASK_DIR/SEAL/build" --parallel 2
+          sudo cmake --install "$TASK_DIR/SEAL/build"
+          git clone --filter=blob:none https://github.com/mpc-msri/EzPC.git "$TASK_DIR/EzPC"
+          git -C "$TASK_DIR/EzPC" checkout --detach f24bf3e022dde3493cf0ffe3ebd92dd73936b734
+          git -C "$TASK_DIR/EzPC" submodule update --init --depth 1 SCI
+          git -C "$TASK_DIR/EzPC/SCI" submodule update --init --depth 1 extern/SEAL
+          mkdir -p "$TASK_DIR/EzPC/SCI/tests/exp260"
+          cp private-research/experiments/260_fixed_negative_perm_preprocess.cpp \
+            "$TASK_DIR/EzPC/SCI/tests/"
+          cp private-research/experiments/260_fixed_negative_e2e.cpp \
+            private-research/experiments/260_fixed_negative_movement.h \
+            "$TASK_DIR/EzPC/SCI/tests/exp260/"
+          test -f "$TASK_DIR/EzPC/SCI/tests/260_fixed_negative_perm_preprocess.cpp"
+          test -f "$TASK_DIR/EzPC/SCI/tests/exp260/260_fixed_negative_e2e.cpp"
+          cat >> "$TASK_DIR/EzPC/SCI/tests/CMakeLists.txt" <<'EOF'
+
+          find_package(SEAL 4.1 REQUIRED)
+          add_executable(exp260-preprocess
+            "${CMAKE_SOURCE_DIR}/tests/260_fixed_negative_perm_preprocess.cpp")
+          target_link_libraries(exp260-preprocess SCI-OT)
+          add_executable(exp260-full-e2e
+            "${CMAKE_SOURCE_DIR}/tests/exp260/260_fixed_negative_e2e.cpp")
+          target_include_directories(exp260-full-e2e PRIVATE
+            "${CMAKE_SOURCE_DIR}/tests/exp260")
+          target_link_libraries(exp260-full-e2e SCI-OT SCI-GC SEAL::seal)
+          EOF
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          p = Path(os.environ["TASK_DIR"]) / "EzPC/SCI/extern/SEAL/native/src/seal/util/locks.h"
+          s = p.read_text()
+          if "#include <mutex>" not in s:
+              p.write_text(s.replace("#pragma once", "#pragma once\n#include <mutex>"))
+          PY
+          cmake -S "$TASK_DIR/EzPC/SCI" -B "$TASK_DIR/EzPC/SCI/build" \
+            -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON -DBUILD_NETWORKS=OFF
+          cmake --build "$TASK_DIR/EzPC/SCI/build" \
+            --target exp260-preprocess exp260-full-e2e --parallel 2 \
+            > "$TASK_DIR/results/build.log" 2>&1
+
+      - name: Generate one frozen OPT-125M layer fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$TASK_DIR/venv/bin/python" \
+            private-research/experiments/260_fixed_negative_opt125m_fixture.py \
+            --out-dir "$TASK_DIR/fixture" --n 256 --test-n 1 \
+            --layer "$LAYER" --capacity "$CAPACITY" --qexp 20 \
+            > "$TASK_DIR/results/fixture.json"
+
+      - name: Convert secure-join correlations to additive movement material
+        shell: bash
+        run: |
+          set -uo pipefail
+          sci="$TASK_DIR/EzPC/SCI/build/bin/exp260-preprocess"
+          "$sci" r=1 p=20370 \
+            file="$TASK_DIR/results/exp226_alice.bin" \
+            out="$TASK_DIR/results/exp260_add_alice.bin" \
+            > "$TASK_DIR/results/prep_p1.log" 2>&1 &
+          p1=$!
+          sleep 0.2
+          "$sci" r=2 p=20370 ip=127.0.0.1 \
+            file="$TASK_DIR/results/exp226_bob.bin" \
+            out="$TASK_DIR/results/exp260_add_bob.bin" \
+            > "$TASK_DIR/results/prep_p2.log" 2>&1
+          c2=$?
+          wait "$p1"
+          c1=$?
+          printf '%s %s\n' "$c1" "$c2" > "$TASK_DIR/results/prep_exit.txt"
+          test "$c1" -eq 0 -a "$c2" -eq 0
+
+      - name: Run real two-party fixed-negative E2E and baseline
+        shell: bash
+        run: |
+          set -uo pipefail
+          exe="$TASK_DIR/EzPC/SCI/build/bin/exp260-full-e2e"
+          "$exe" r=1 p=20371 \
+            layer="$LAYER" capacity="$CAPACITY" \
+            zfile="$TASK_DIR/fixture/exp260_fixed_negative_z.bin" \
+            permfile="$TASK_DIR/results/exp260_add_alice.bin" \
+            > "$TASK_DIR/results/e2e_p1.log" 2>&1 &
+          p1=$!
+          sleep 0.3
+          timeout --foreground --signal=TERM --kill-after=10s 1500s \
+            "$exe" r=2 p=20371 ip=127.0.0.1 \
+            layer="$LAYER" capacity="$CAPACITY" \
+            afile="$TASK_DIR/fixture/exp260_fixed_negative_a.bin" \
+            permfile="$TASK_DIR/results/exp260_add_bob.bin" \
+            > "$TASK_DIR/results/e2e_p2.log" 2>&1
+          c2=$?
+          wait "$p1"
+          c1=$?
+          printf '%s %s\n' "$c1" "$c2" > "$TASK_DIR/results/e2e_exit.txt"
+          test "$c1" -eq 0 -a "$c2" -eq 0
+
+      - name: Parse allowlisted aggregate metrics
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$TASK_DIR/venv/bin/python" - "$TASK_DIR" <<'PY'
+          import json
+          import os
+          import pathlib
+          import sys
+
+          root = pathlib.Path(sys.argv[1])
+          results = root / "results"
+          summary_path = results / "exp260_fixed_negative_opt125m_summary.json"
+          source_commit = os.environ.get("TDA_COMMIT", "")
+          summary = {
+              "experiment": "Exp260 probe-free fixed-negative OPT-125M single-layer E2E",
+              "source_commit": source_commit if len(source_commit) == 40 and all(c in "0123456789abcdef" for c in source_commit) else "invalid",
+              "scope": {
+                  "N": 3072,
+                  "layer": int(os.environ["LAYER"]),
+                  "capacity": int(os.environ["CAPACITY"]),
+                  "capacity_source": "maximum observed certificate-unresolved count in the frozen 256-row reference cohort",
+                  "capacity_reference_rows": 256,
+                  "fresh_e2e_input": "first deterministically selected row from disjoint WikiText-2 test split",
+                  "common_he_to_mpc_bridge_in_online_comparison": False,
+                  "online_wall_time_aggregation": "maximum of two party elapsed times",
+                  "online_communication_aggregation": "sum of both parties sent bytes",
+                  "round_aggregation": "maximum party rounds; do not sum across parties",
+                  "only_allowlisted_numeric_aggregates_included": True,
+              },
+          }
+
+          def parse_pairs(path, prefix):
+              rows = []
+              if not path.exists():
+                  return rows
+              for line in path.read_text(errors="replace").splitlines():
+                  if not line.startswith(prefix):
+                      continue
+                  row = {}
+                  for token in line[len(prefix):].split():
+                      if "=" not in token:
+                          continue
+                      key, value = token.split("=", 1)
+                      try:
+                          row[key] = float(value) if any(c in value for c in ".eE") else int(value)
+                      except ValueError:
+                          continue
+                  rows.append(row)
+              return rows
+
+          def exit_codes(name):
+              path = results / name
+              if not path.exists():
+                  return None
+              try:
+                  values = [int(v) for v in path.read_text().split()]
+                  return values if len(values) == 2 else None
+              except ValueError:
+                  return None
+
+          integer_fields = {
+              "party", "N", "layer", "capacity", "qexp", "no_probe", "accepted",
+              "capacity_overflow", "opened_weight", "certificate_pass_count",
+              "unresolved_count", "native_relu_calls", "full_native_relu_calls",
+              "output_mismatch_count", "baseline_mismatch_count", "common_he_bridge_bytes",
+              "common_he_bridge_rounds", "certificate_ciphertexts_sent",
+              "certificate_plaintext_ct_multiplies", "certificate_plaintext_additions",
+              "certificate_ciphertext_ct_multiplies", "certificate_decryptions",
+              "plaintext_sign_comparisons", "certificate_xor_share_return_bytes",
+              "beaver_open_bits_bytes_per_party", "public_blind_range_bound",
+              "public_blind_A_min", "public_blind_A_max", "public_blind_B_max",
+              "local_certificate_preprocessing_bytes", "local_certificate_preprocessing_rounds",
+              "online_bytes", "online_rounds", "full_baseline_bytes", "full_baseline_rounds",
+              "fresh_preprocessing_bytes", "fresh_preprocessing_rounds", "movement_bytes",
+              "movement_rounds", "mismatch", "no_wrap_checked",
+          }
+          float_fields = {
+              "common_he_bridge_ms", "fixture_ciphertext_setup_ms",
+              "local_certificate_preprocessing_ms", "online_ms", "full_baseline_ms",
+              "fresh_preprocessing_ms", "remaining_native_relu_ms", "auxiliary_ms",
+          }
+          rows = []
+          for path in sorted(results.glob("e2e_p*.log")):
+              for row in parse_pairs(path, "EXP260_FIXED_NEGATIVE_RESULT "):
+                  clean = {k: row[k] for k in integer_fields | float_fields if k in row}
+                  if "party" in clean:
+                      rows.append(clean)
+          summary["e2e_exit_codes"] = exit_codes("e2e_exit.txt")
+          summary["preprocessing_exit_codes"] = exit_codes("prep_exit.txt")
+          summary["e2e_party_count"] = len(rows)
+
+          fixture_path = root / "fixture" / "exp260_fixed_negative_fixture.json"
+          if fixture_path.exists():
+              fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+              if fixture.get("fresh_e2e_dataset_split") != "test":
+                  raise SystemExit("E2E input must come from the independent WikiText-2 test split")
+              capacity_source = fixture.get("capacity_source", {})
+              if "validation" not in capacity_source.get("reference_split", ""):
+                  raise SystemExit("capacity reference must remain the frozen validation cohort")
+              stats = fixture.get("test_capacity_statistics", {})
+              summary["fresh_input_aggregate"] = {
+                  "layer": fixture.get("layer_index"),
+                  "fresh_dataset_split": fixture.get("fresh_e2e_dataset_split"),
+                  "capacity_reference_split": capacity_source.get("reference_split"),
+                  "capacity_reference_rows": capacity_source.get("reference_rows"),
+                  "positive_relu_count": fixture.get("selected_test_true_positive_relu_count"),
+                  "quantized_positive_relu_count": fixture.get("selected_test_quantized_positive_relu_count"),
+                  "certificate_unresolved_count": fixture.get("unresolved_count"),
+                  "capacity_accepted": fixture.get("accepted_fixed_capacity"),
+                  "rows": stats.get("rows"),
+                  "overflow_rows": stats.get("overflow_rows"),
+              }
+
+          phase_names = {
+              "fixed_negative_online_excluding_common_input",
+              "fresh_preprocessing_total",
+              "certificate_packed_he_compare", "certificate_bool_beaver",
+              "certificate_mask_b2a", "capacity_compare_online",
+              "full_native_relu_baseline_excluding_common_input",
+              "certificate_bool_beaver_preprocess", "certificate_and_dummy_dabit_preprocess",
+              "capacity_compare_preprocess", "dummy_b2a", "shuffle_forward_plus_open",
+              "native_relu_tail", "shuffle_inverse", "overflow_full_native_relu",
+              "baseline_native_relu",
+          }
+          phase_map = {}
+          for path in sorted(results.glob("e2e_p*.log")):
+              for row in parse_pairs(path, "EXP260_PHASE "):
+                  name = row.get("name")
+                  if name not in phase_names:
+                      continue
+                  phase_map.setdefault(name, []).append(row)
+          summary["phases"] = {
+              name: {
+                  "wall_ms_max_party": max(float(r.get("ms", 0.0)) for r in entries),
+                  "pair_bytes_sent": sum(int(r.get("bytes", 0)) for r in entries),
+                  "rounds_max_party": max(int(r.get("rounds", 0)) for r in entries),
+              }
+              for name, entries in sorted(phase_map.items())
+          }
+
+          detail_fields = {
+              "server_affine_ms", "server_serialize_ms", "server_send_ms",
+              "server_wait_for_client_ms", "server_unmask_ms", "client_receive_ms",
+              "client_deserialize_ms", "client_decrypt_ms", "client_decode_ms",
+              "client_plaintext_compare_ms", "client_send_ms",
+          }
+          detail_rows = []
+          for path in sorted(results.glob("e2e_p*.log")):
+              for row in parse_pairs(path, "EXP260_COMPARE_DETAIL "):
+                  clean = {key: float(row[key]) for key in detail_fields if key in row}
+                  if clean:
+                      detail_rows.append(clean)
+          if detail_rows:
+              summary["packed_comparison_local_timing_ms_max_party"] = {
+                  key: max(row.get(key, 0.0) for row in detail_rows)
+                  for key in sorted(detail_fields)
+              }
+
+          prep_rows = []
+          for path in sorted(results.glob("prep_p*.log")):
+              prep_rows.extend(parse_pairs(path, "EXP260_PERM_PREP_RESULT "))
+          summary["movement_x2a_preprocessing"] = {
+              "party_count": len(prep_rows),
+              "wall_ms_max_party": max((float(r.get("x2a_ms", 0.0)) for r in prep_rows), default=0.0),
+              "pair_bytes_sent": sum(int(r.get("x2a_bytes", 0)) for r in prep_rows),
+              "rounds_max_party": max((int(r.get("x2a_rounds", 0)) for r in prep_rows), default=0),
+          }
+          sj_rows = parse_pairs(results / "secure_join.log", "EXP226_CORR_RESULT ")
+          if sj_rows:
+              sj = sj_rows[0]
+              summary["secure_join_correlation_preprocessing"] = {
+                  key: sj[key] for key in ("M", "setup_bytes", "mock", "preprocess_ms", "preprocess_bytes") if key in sj
+              }
+
+          if len(rows) == 2 and {r.get("party") for r in rows} == {1, 2}:
+              p1 = next(row for row in rows if row["party"] == 1)
+              online_ms = max(float(row["online_ms"]) for row in rows)
+              baseline_ms = max(float(row["full_baseline_ms"]) for row in rows)
+              online_bytes = sum(int(row["online_bytes"]) for row in rows)
+              baseline_bytes = sum(int(row["full_baseline_bytes"]) for row in rows)
+              online = {
+                  "ours": {
+                      "wall_ms": online_ms,
+                      "pair_bytes_sent": online_bytes,
+                      "rounds_max_party": max(int(row["online_rounds"]) for row in rows),
+                      "native_relu_calls": p1["native_relu_calls"],
+                      "certificate_pass_count": p1["certificate_pass_count"],
+                      "unresolved_count": p1["unresolved_count"],
+                      "capacity_overflow": p1["capacity_overflow"],
+                      "output_mismatch_count": p1["output_mismatch_count"],
+                      "baseline_output_mismatch_count": p1["baseline_mismatch_count"],
+                      "certificate_ciphertexts_sent": p1.get("certificate_ciphertexts_sent"),
+                      "plaintext_sign_comparisons": p1.get("plaintext_sign_comparisons"),
+                      "xor_share_response_bytes_per_party": p1.get("certificate_xor_share_return_bytes"),
+                  },
+                  "full_native_relu_baseline": {
+                      "wall_ms": baseline_ms,
+                      "pair_bytes_sent": baseline_bytes,
+                      "rounds_max_party": max(int(row["full_baseline_rounds"]) for row in rows),
+                      "native_relu_calls": p1["full_native_relu_calls"],
+                  },
+              }
+              if "remaining_native_relu_ms" in p1:
+                  online["ours"]["retained_native_relu_wall_ms_max_party"] = max(
+                      float(row.get("remaining_native_relu_ms", 0.0)) for row in rows
+                  )
+                  online["ours"]["auxiliary_beyond_retained_relu_wall_ms_proxy"] = max(
+                      float(row["online_ms"]) - float(row.get("remaining_native_relu_ms", 0.0))
+                      for row in rows
+                  )
+              summary["online_comparison"] = online
+              summary["ratios"] = {
+                  "speedup_full_native_over_ours": baseline_ms / online_ms if online_ms else None,
+                  "communication_full_native_over_ours": baseline_bytes / online_bytes if online_bytes else None,
+                  "native_relu_call_reduction_factor": p1["full_native_relu_calls"] / p1["native_relu_calls"] if p1["native_relu_calls"] else None,
+              }
+              summary["common_he_to_mpc_bridge"] = {
+                  "wall_ms_max_party": max(float(row.get("common_he_bridge_ms", 0.0)) for row in rows),
+                  "pair_bytes_sent": sum(int(row.get("common_he_bridge_bytes", 0)) for row in rows),
+                  "rounds_max_party": max(int(row.get("common_he_bridge_rounds", 0)) for row in rows),
+              }
+              summary["fixture_he_ciphertext_setup_excluded"] = {
+                  "wall_ms_max_party": max(float(row.get("fixture_ciphertext_setup_ms", 0.0)) for row in rows),
+              }
+              summary["fresh_protocol_preprocessing"] = {
+                  "mpc_material_total_wall_ms_max_party": max(float(row.get("fresh_preprocessing_ms", 0.0)) for row in rows),
+                  "mpc_material_total_pair_bytes_sent": sum(int(row.get("fresh_preprocessing_bytes", 0)) for row in rows),
+                  "mpc_material_total_rounds_max_party": max(int(row.get("fresh_preprocessing_rounds", 0)) for row in rows),
+                  "local_blinding_and_bitshare_ms_max_party_included_in_total": max(float(row.get("local_certificate_preprocessing_ms", 0.0)) for row in rows),
+                  "movement_x2a": summary["movement_x2a_preprocessing"],
+                  "secure_join_correlation": summary.get("secure_join_correlation_preprocessing"),
+              }
+              summary["status"] = "ok" if all(int(row.get("mismatch", 1)) == 0 for row in rows) else "mismatch"
+          else:
+              summary["status"] = "incomplete"
+
+          summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")
+          print("EXP260_SANITIZED_SUMMARY status=" + summary["status"] + " parties=" + str(len(rows)))
+          if summary["status"] != "ok":
+              raise SystemExit("sanitized E2E summary incomplete or mismatched")
+          PY
+      - name: Upload sanitized aggregate summary
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: exp260-fixed-negative-opt125m-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.TASK_DIR }}/results/exp260_fixed_negative_opt125m_summary.json
+          if-no-files-found: warn
+          retention-days: 1
+      - name: Remove private scratch data
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="$RUNNER_TEMP/exp260-fixed-negative-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          test "$(realpath -m -- "$TASK_DIR")" = "$(realpath -m -- "$expected")"
+          rm -rf -- "$expected" "$GITHUB_WORKSPACE/private-research"
+
