@@ -89,6 +89,8 @@ jobs:
           sudo cmake --install "$TASK_DIR/SEAL/build"
           git clone --filter=blob:none https://github.com/mpc-msri/EzPC.git "$TASK_DIR/EzPC"
           git -C "$TASK_DIR/EzPC" checkout --detach f24bf3e022dde3493cf0ffe3ebd92dd73936b734
+          git -C "$TASK_DIR/EzPC" submodule update --init --depth 1 SCI
+          git -C "$TASK_DIR/EzPC/SCI" submodule update --init --depth 1 extern/SEAL
           mkdir -p "$TASK_DIR/EzPC/SCI/tests/exp260"
           cp private-research/experiments/260_fixed_negative_perm_preprocess.cpp \
             "$TASK_DIR/EzPC/SCI/tests/"
@@ -104,7 +106,6 @@ jobs:
           target_include_directories(exp260-full-e2e PRIVATE exp260)
           target_link_libraries(exp260-full-e2e SCI-OT SCI-GC SEAL::seal)
           EOF
-          git -C "$TASK_DIR/EzPC" submodule update --init --depth 1 SCI/extern/SEAL
           python3 - <<'PY'
           from pathlib import Path
           import os
