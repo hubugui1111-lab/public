@@ -72,7 +72,8 @@ jobs:
           set -euo pipefail
           git clone --depth 1 https://github.com/ladnir/secure-join.git "$TASK_DIR/secure-join"
           python3 scripts/patch_secure_join_exp226_dump.py "$TASK_DIR/secure-join"
-          python3 "$TASK_DIR/secure-join/build.py" -DENABLE_MOCK_OT=false -DCMAKE_BUILD_TYPE=Release
+          (cd "$TASK_DIR/secure-join" && python3 build.py \
+            -DENABLE_MOCK_OT=false -DCMAKE_BUILD_TYPE=Release)
           "$TASK_DIR/secure-join/out/build/linux/frontend/secJoinfrontend" \
             -bench -Exp226 -n 3072 -B 320 -mock 0 -nt 2 -out "$TASK_DIR/results" \
             > "$TASK_DIR/results/secure_join.log" 2>&1
@@ -248,6 +249,7 @@ jobs:
               raise SystemExit("expected two E2E result rows")
           if any(row.get("mismatch", 1) != 0 for row in rows):
               raise SystemExit("fixed-negative E2E mismatch")
+          PY
       - name: Upload raw metrics and logs
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
