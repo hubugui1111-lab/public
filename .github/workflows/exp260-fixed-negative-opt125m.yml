@@ -1,0 +1,268 @@
+# TEMPLATE ONLY: install temporarily in the public compute repository.
+# The private checkout is read-only; only aggregate metrics and raw protocol
+# stdout are uploaded as a short-lived artifact, then the workflow is removed.
+name: exp260-fixed-negative-opt125m
+
+on:
+  workflow_dispatch:
+    inputs:
+      private_ref:
+        description: Full immutable private source SHA
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 75
+    env:
+      TDA_COMMIT: ${{ inputs.private_ref }}
+      HF_HUB_DISABLE_TELEMETRY: '1'
+      TOKENIZERS_PARALLELISM: 'false'
+      OMP_NUM_THREADS: '4'
+      MKL_NUM_THREADS: '4'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Initialize bounded scratch job
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$TDA_COMMIT" =~ ^[0-9a-f]{40}$ ]] || exit 2
+          TASK_DIR="$RUNNER_TEMP/exp260-fixed-negative-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          echo "TASK_DIR=$TASK_DIR" >> "$GITHUB_ENV"
+          echo "HF_HOME=$TASK_DIR/huggingface" >> "$GITHUB_ENV"
+          echo "PIP_CACHE_DIR=$TASK_DIR/pip-cache" >> "$GITHUB_ENV"
+          umask 077
+          mkdir -p "$TASK_DIR/results"
+
+      - name: Checkout private source read-only
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: hubugui1111-lab/tda-ppml-research
+          ref: ${{ inputs.private_ref }}
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          path: private-research
+          fetch-depth: 1
+          persist-credentials: false
+          submodules: false
+
+      - name: Install pinned dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C private-research rev-parse HEAD)" = "$TDA_COMMIT"
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq build-essential clang cmake g++ make git \
+            libeigen3-dev libgmp-dev libmpfr-dev libomp-dev libssl-dev python3-venv
+          python3 -m venv "$TASK_DIR/venv"
+          "$TASK_DIR/venv/bin/python" -m pip install --disable-pip-version-check \
+            torch==2.8.0+cpu --index-url https://download.pytorch.org/whl/cpu
+          "$TASK_DIR/venv/bin/python" -m pip install --disable-pip-version-check \
+            numpy==2.1.3 transformers==4.56.2 datasets==3.2.0 \
+            huggingface-hub==0.34.4 safetensors==0.6.2 sentencepiece==0.2.1
+
+      - name: Build secure-join correlation backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --depth 1 https://github.com/ladnir/secure-join.git "$TASK_DIR/secure-join"
+          python3 scripts/patch_secure_join_exp226_dump.py "$TASK_DIR/secure-join"
+          python3 "$TASK_DIR/secure-join/build.py" -DENABLE_MOCK_OT=false -DCMAKE_BUILD_TYPE=Release
+          "$TASK_DIR/secure-join/out/build/linux/frontend/secJoinfrontend" \
+            -bench -Exp226 -n 3072 -B 320 -mock 0 -nt 2 -out "$TASK_DIR/results" \
+            > "$TASK_DIR/results/secure_join.log" 2>&1
+
+      - name: Build SEAL and SCI targets
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch v4.1.2 https://github.com/microsoft/SEAL.git "$TASK_DIR/SEAL"
+          cmake -S "$TASK_DIR/SEAL" -B "$TASK_DIR/SEAL/build" \
+            -DSEAL_BUILD_TESTS=OFF -DSEAL_BUILD_EXAMPLES=OFF -DCMAKE_BUILD_TYPE=Release
+          cmake --build "$TASK_DIR/SEAL/build" --parallel 2
+          sudo cmake --install "$TASK_DIR/SEAL/build"
+          git clone --filter=blob:none https://github.com/mpc-msri/EzPC.git "$TASK_DIR/EzPC"
+          git -C "$TASK_DIR/EzPC" checkout --detach f24bf3e022dde3493cf0ffe3ebd92dd73936b734
+          mkdir -p "$TASK_DIR/EzPC/SCI/tests/exp260"
+          cp private-research/experiments/260_fixed_negative_perm_preprocess.cpp \
+            "$TASK_DIR/EzPC/SCI/tests/"
+          cp private-research/experiments/260_fixed_negative_e2e.cpp \
+            private-research/experiments/260_fixed_negative_movement.h \
+            "$TASK_DIR/EzPC/SCI/tests/exp260/"
+          cat >> "$TASK_DIR/EzPC/SCI/tests/CMakeLists.txt" <<'EOF'
+
+          find_package(SEAL 4.1 REQUIRED)
+          add_executable(exp260-preprocess exp260_fixed_negative_perm_preprocess.cpp)
+          target_link_libraries(exp260-preprocess SCI-OT)
+          add_executable(exp260-full-e2e exp260/260_fixed_negative_e2e.cpp)
+          target_include_directories(exp260-full-e2e PRIVATE exp260)
+          target_link_libraries(exp260-full-e2e SCI-OT SCI-GC SEAL::seal)
+          EOF
+          git -C "$TASK_DIR/EzPC" submodule update --init --depth 1 SCI/extern/SEAL
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          p = Path(os.environ["TASK_DIR"]) / "EzPC/SCI/extern/SEAL/native/src/seal/util/locks.h"
+          s = p.read_text()
+          if "#include <mutex>" not in s:
+              p.write_text(s.replace("#pragma once", "#pragma once\n#include <mutex>"))
+          PY
+          cmake -S "$TASK_DIR/EzPC/SCI" -B "$TASK_DIR/EzPC/SCI/build" \
+            -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON -DBUILD_NETWORKS=OFF
+          cmake --build "$TASK_DIR/EzPC/SCI/build" \
+            --target exp260-preprocess exp260-full-e2e --parallel 2 \
+            > "$TASK_DIR/results/build.log" 2>&1
+
+      - name: Generate one frozen OPT-125M layer fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$TASK_DIR/venv/bin/python" \
+            private-research/experiments/260_fixed_negative_opt125m_fixture.py \
+            --out-dir "$TASK_DIR/fixture" --n 256 --capacity 320 --qexp 20 \
+            > "$TASK_DIR/results/fixture.json"
+          cp "$TASK_DIR/fixture/exp260_fixed_negative_fixture.json" \
+            "$TASK_DIR/results/fixture_metadata.json"
+
+      - name: Convert secure-join correlations to additive movement material
+        shell: bash
+        run: |
+          set -uo pipefail
+          sci="$TASK_DIR/EzPC/SCI/build/bin/exp260-preprocess"
+          "$sci" r=1 p=20370 \
+            file="$TASK_DIR/results/exp226_alice.bin" \
+            out="$TASK_DIR/results/exp260_add_alice.bin" \
+            > "$TASK_DIR/results/prep_p1.log" 2>&1 &
+          p1=$!
+          sleep 0.2
+          "$sci" r=2 p=20370 ip=127.0.0.1 \
+            file="$TASK_DIR/results/exp226_bob.bin" \
+            out="$TASK_DIR/results/exp260_add_bob.bin" \
+            > "$TASK_DIR/results/prep_p2.log" 2>&1
+          c2=$?
+          wait "$p1"
+          c1=$?
+          cat "$TASK_DIR/results/prep_p1.log"
+          cat "$TASK_DIR/results/prep_p2.log"
+          test "$c1" -eq 0 -a "$c2" -eq 0
+
+      - name: Run real two-party fixed-negative E2E and baseline
+        shell: bash
+        run: |
+          set -uo pipefail
+          exe="$TASK_DIR/EzPC/SCI/build/bin/exp260-full-e2e"
+          "$exe" r=1 p=20371 \
+            zfile="$TASK_DIR/fixture/exp260_fixed_negative_z.bin" \
+            permfile="$TASK_DIR/results/exp260_add_alice.bin" \
+            > "$TASK_DIR/results/e2e_p1.log" 2>&1 &
+          p1=$!
+          sleep 0.3
+          timeout --foreground --signal=TERM --kill-after=10s 1500s \
+            "$exe" r=2 p=20371 ip=127.0.0.1 \
+            afile="$TASK_DIR/fixture/exp260_fixed_negative_a.bin" \
+            permfile="$TASK_DIR/results/exp260_add_bob.bin" \
+            > "$TASK_DIR/results/e2e_p2.log" 2>&1
+          c2=$?
+          wait "$p1"
+          c1=$?
+          cat "$TASK_DIR/results/e2e_p1.log"
+          cat "$TASK_DIR/results/e2e_p2.log"
+          test "$c1" -eq 0 -a "$c2" -eq 0
+
+      - name: Parse raw metrics
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$TASK_DIR/venv/bin/python" - "$TASK_DIR" <<'PY'
+          import json
+          import pathlib
+          import re
+          import sys
+
+          root = pathlib.Path(sys.argv[1])
+          out = {"experiment": "Exp260 probe-free fixed-negative OPT-125M single-layer E2E"}
+          metadata = root / "results" / "fixture_metadata.json"
+          if metadata.exists():
+              out["fixture"] = json.loads(metadata.read_text())
+          rows = []
+          phases = []
+          for path in sorted((root / "results").glob("e2e_p*.log")):
+              for line in path.read_text(errors="replace").splitlines():
+                  prefix = None
+                  if line.startswith("EXP260_FIXED_NEGATIVE_RESULT "):
+                      prefix = "EXP260_FIXED_NEGATIVE_RESULT "
+                  elif line.startswith("EXP260_PHASE "):
+                      prefix = "EXP260_PHASE "
+                  if prefix is None:
+                      continue
+                  row = {"source": path.name}
+                  for token in line[len(prefix):].split():
+                      key, value = token.split("=", 1)
+                      try:
+                          row[key] = float(value) if any(c in value for c in ".eE") else int(value)
+                      except ValueError:
+                          row[key] = value
+                  (rows if prefix.startswith("EXP260_FIXED") else phases).append(row)
+          out["e2e_rows"] = rows
+          out["phases"] = phases
+          prep = []
+          for path in sorted((root / "results").glob("prep_p*.log")):
+              for line in path.read_text(errors="replace").splitlines():
+                  if line.startswith("EXP260_PERM_PREP_RESULT "):
+                      row = {"source": path.name}
+                      for token in line[len("EXP260_PERM_PREP_RESULT "):].split():
+                          key, value = token.split("=", 1)
+                          row[key] = float(value) if any(c in value for c in ".eE") else int(value)
+                      prep.append(row)
+          out["movement_preprocessing"] = prep
+          if len(rows) == 2:
+              p1 = next(row for row in rows if row["party"] == 1)
+              out["party1"] = p1
+              out["ratios"] = {
+                  "online_speedup_full_baseline_over_ours": p1["full_baseline_ms"] / p1["online_ms"],
+                  "communication_ratio_full_baseline_over_ours": p1["full_baseline_bytes"] / p1["online_bytes"],
+                  "native_call_ratio_full_over_ours": p1["full_native_relu_calls"] / p1["native_relu_calls"],
+              }
+              if prep:
+                  move = next(row for row in prep if row["party"] == 1)
+                  out["fresh_preprocessing_total_party1"] = {
+                      "protocol_material_ms": p1["fresh_preprocessing_ms"],
+                      "protocol_material_bytes": p1["fresh_preprocessing_bytes"],
+                      "movement_x2a_ms": move["x2a_ms"],
+                      "movement_x2a_bytes": move["x2a_bytes"],
+                      "secure_join_ms": None,
+                      "secure_join_bytes": None,
+                      "note": "secure-join timing/bytes are retained in secure_join.log and added manually if present",
+                  }
+          (root / "results" / "exp260_fixed_negative_opt125m_e2e_raw.json").write_text(
+              json.dumps(out, indent=2) + "\n"
+          )
+          print(json.dumps(out, indent=2))
+          if len(rows) != 2:
+              raise SystemExit("expected two E2E result rows")
+          if any(row.get("mismatch", 1) != 0 for row in rows):
+              raise SystemExit("fixed-negative E2E mismatch")
+      - name: Upload raw metrics and logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: exp260-fixed-negative-opt125m-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ env.TASK_DIR }}/results/*.json
+            ${{ env.TASK_DIR }}/results/*.log
+          if-no-files-found: warn
+          retention-days: 1
+      - name: Remove private scratch data
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="$RUNNER_TEMP/exp260-fixed-negative-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          test "$(realpath -m -- "$TASK_DIR")" = "$(realpath -m -- "$expected")"
+          rm -rf -- "$expected" "$GITHUB_WORKSPACE/private-research"
